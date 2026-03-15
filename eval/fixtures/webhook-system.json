@@ -1,0 +1,7 @@
+{
+  "task": "Design a webhook delivery system with retry logic and dead letter queues",
+  "requirements": "At-least-once delivery, configurable retry backoff",
+  "constraints": "Use existing Postgres + Redis stack, no new services",
+  "expectedTopics": ["dead letter", "retry", "backoff", "queue", "delivery", "Postgres"],
+  "minScore": 6
+}

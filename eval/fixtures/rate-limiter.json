@@ -1,0 +1,7 @@
+{
+  "task": "Design a rate limiting system for a REST API",
+  "requirements": "Support per-user and per-IP limits, sliding window algorithm",
+  "constraints": "Use Redis for state, no external rate limiting services",
+  "expectedTopics": ["Redis", "sliding window", "token bucket", "middleware", "limits"],
+  "minScore": 6
+}
