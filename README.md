@@ -2,7 +2,7 @@
 
 **4-model parallel planning workflow with eval framework.**
 
-Run a task through Claude (Opus), Gemini, Codex (GPT-5.4), and GLM-5 simultaneously. Each produces an independent plan. Then cross-examine them. Then converge on the best synthesis.
+Run a task through Claude (Opus), Gemini, Codex (GPT), and GLM-5 simultaneously. Each produces an independent plan with a **lens-based prompt** (correctness, scale, speed, or failure analysis). Then cross-examine them. Then converge on the best synthesis **weighted by eval scores**.
 
 Kill model selection anxiety. Get plans that have been stress-tested before a single line of code is written.
 
@@ -10,15 +10,22 @@ Kill model selection anxiety. Get plans that have been stress-tested before a si
 
 ## Install
 
+### Go install
+
 ```bash
-npm install -g multiplan
+go install github.com/cyperx84/multiplan@latest
 ```
 
-Or run from source:
+### Download binary
+
+Grab the latest release from [Releases](https://github.com/cyperx84/multiplan/releases).
+
+### Build from source
+
 ```bash
 git clone https://github.com/cyperx84/multiplan
-cd multiplan && npm install && npm run build
-npm link
+cd multiplan
+go build -o multiplan .
 ```
 
 ---
@@ -40,25 +47,46 @@ multiplan eval ~/.multiplan/runs/LATEST/final-plan.md
 
 ---
 
-## How it works
+## How it works (v0.2.0 — lens-based prompts + eval scores)
 
-**Phase 1 — Independent planning (parallel)**
-All four models receive the same task spec. Each produces a complete plan with no cross-contamination. They run concurrently — total time ≈ slowest model.
+**Phase 1 — Independent planning (parallel, lens-based)**
+
+All four models receive the same task spec, but with **different lenses**:
+
+| Model | Lens |
+|-------|------|
+| **Claude** | "Plan this prioritising correctness and edge cases" |
+| **Gemini** | "Plan this prioritising scale and operational simplicity" |
+| **Codex/GPT** | "Plan this from a pure implementation perspective — what ships fastest" |
+| **GLM-5** | "Plan this as a critic — what are all the ways this could fail" |
+
+Each produces a complete plan with no cross-contamination. They run concurrently — total time ≈ slowest model.
+
+**Phase 1.5 — Eval scores (NEW in v0.2.0)**
+
+Each plan is scored on:
+- **Coverage** — Required sections present
+- **Specificity** — Concrete tech/numbers vs vague language
+- **Actionable** — Numbered steps, code blocks
+
+Scores (0-10) are injected into the convergence phase so the final plan can **weight higher-scoring plans more heavily**.
 
 **Phase 2 — Cross-examination**
+
 One model (default: Claude) reviews all four plans: what each gets right, what each misses, where they agree, where they disagree.
 
-**Phase 3 — Convergence**
-Final synthesis: best ideas from all four, disagreements resolved, gaps filled. One actionable, validated plan.
+**Phase 3 — Convergence (weighted by eval scores)**
+
+Final synthesis: best ideas from all four, **prioritising higher-scoring plans**, disagreements resolved, gaps filled. One actionable, validated plan.
 
 Output directory: `~/.multiplan/runs/<timestamp>/`
 
 | File | Contents |
 |------|----------|
-| `plan-claude.md` | Claude Opus plan |
-| `plan-gemini.md` | Gemini plan |
-| `plan-codex.md` | Codex/GPT plan |
-| `plan-glm5.md` | GLM-5 plan |
+| `plan-claude.md` | Claude Opus plan (correctness lens) |
+| `plan-gemini.md` | Gemini plan (scale lens) |
+| `plan-codex.md` | Codex/GPT plan (speed lens) |
+| `plan-glm5.md` | GLM-5 plan (critic lens) |
 | `debate.md` | Cross-examination |
 | `final-plan.md` | ✅ Start here |
 
@@ -70,8 +98,6 @@ Output directory: `~/.multiplan/runs/<timestamp>/`
 multiplan <task> [options]
 multiplan plan <task> [options]
 multiplan eval <file-or-dir> [options]
-multiplan skill
-multiplan integrations [--claude-code] [--codex]
 ```
 
 ### Options
@@ -141,101 +167,36 @@ Pre-built eval cases in `eval/fixtures/*.json`:
 }
 ```
 
-### Use as a module
-
-```typescript
-import { run } from 'multiplan';
-import { evalPlan, evalRun } from 'multiplan/eval';
-
-// Run planning
-const result = await run({
-  task: 'Design a rate limiting system',
-  requirements: 'Per-user limits',
-  constraints: 'Redis only',
-});
-
-// Eval a single plan
-const report = await evalPlan(result.finalPlan, {
-  task: result.task,
-  expectedTopics: ['Redis', 'sliding window'],
-  minScore: 7,
-}, { judge: 'claude' });
-
-console.log(report.markdown);
-console.log(report.pass); // true/false
-
-// Eval all plans in a run directory
-const reports = await evalRun(result.outputDir, {
-  task: result.task,
-  minScore: 6,
-});
-```
-
 ---
 
 ## Model auth
 
 | Model | Auth |
 |-------|------|
-| **Claude** | `claude` CLI — authenticated via Claude Code / `claude auth login` |
-| **Gemini** | `gemini` CLI — authenticated via `gemini auth login` |
-| **Codex** | `codex` CLI — authenticated via `codex auth login` |
-| **GLM-5** | Reads from `~/.openclaw/agents/main/agent/auth-profiles.json` (OpenClaw), or set `ZAI_API_KEY` env var |
+| **Claude** | `ANTHROPIC_API_KEY` environment variable |
+| **Gemini** | `GOOGLE_AI_API_KEY` or `GEMINI_API_KEY` environment variable |
+| **Codex** | `OPENAI_API_KEY` environment variable |
+| **GLM-5** | `ZAI_API_KEY` env var, or reads from `~/.openclaw/agents/main/agent/auth-profiles.json` (OpenClaw) |
 
 Models are auto-discovered at runtime. If a model is missing or fails, it's marked unavailable and skipped — planning continues with the remaining models.
 
 ---
 
-## Config
+## What's new in v0.2.0
 
-Create `~/.multiplanrc` or `.multiplanrc` in your project root:
-
-```json
-{
-  "defaultModels": ["claude", "gemini", "glm5"],
-  "timeoutMs": 180000,
-  "debateModel": "claude",
-  "convergeModel": "claude"
-}
-```
-
----
-
-## Integration
-
-### OpenClaw skill
-
-```bash
-multiplan skill
-```
-
-Generates/updates `~/openclaw/skills/multiplan/SKILL.md` so OpenClaw's AI can invoke multiplan directly.
-
-### Claude Code (CLAUDE.md)
-
-```bash
-multiplan integrations --claude-code
-```
-
-Paste the output into your project's `CLAUDE.md`.
-
-### Codex (.codex/agent.md)
-
-```bash
-multiplan integrations --codex
-```
-
-Paste into `.codex/agent.md` in your project.
+1. **Lens-based prompts** — Each model gets a different planning angle (correctness, scale, speed, critique)
+2. **Eval → convergence** — Plans are scored before convergence, and scores are injected into the final synthesis prompt
+3. **Streaming progress** — See which models finish first (goroutines + channels)
+4. **Single binary** — No runtime dependencies, just Go
 
 ---
 
 ## Development
 
 ```bash
-npm run build       # TypeScript compile
-npm run dev         # Watch mode
-npm test            # Build + run unit tests (no model calls)
-npm run test:unit   # Unit tests only (after build)
+go build -o multiplan .   # Build
+go test ./...             # Run tests
+./multiplan --help        # Verify CLI
 ```
 
 ---

@@ -1,0 +1,43 @@
+package cmd
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/spf13/cobra"
+)
+
+var rootCmd = &cobra.Command{
+	Use:   "multiplan",
+	Short: "4-model parallel planning workflow with eval framework",
+	Long: `multiplan runs a task through Claude (Opus), Gemini, Codex (GPT), and GLM-5 simultaneously.
+Each produces an independent plan. Then cross-examine them. Then converge on the best synthesis.`,
+	Version: "0.2.0",
+	Run: func(cmd *cobra.Command, args []string) {
+		if len(args) > 0 {
+			// Default behavior: if a task is provided, run planning
+			runPlanCommand(cmd, args)
+		} else {
+			cmd.Help()
+		}
+	},
+}
+
+func Execute() {
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func init() {
+	// Global flags for planning (shared with plan subcommand)
+	rootCmd.PersistentFlags().String("req", "", "Requirements")
+	rootCmd.PersistentFlags().String("con", "", "Constraints")
+	rootCmd.PersistentFlags().String("out", "", "Output directory")
+	rootCmd.PersistentFlags().String("models", "", "Comma-separated models (claude,gemini,codex,glm5)")
+	rootCmd.PersistentFlags().String("debate-model", "claude", "Model for debate phase")
+	rootCmd.PersistentFlags().String("converge-model", "claude", "Model for convergence phase")
+	rootCmd.PersistentFlags().Int("timeout", 120000, "Per-model timeout in milliseconds")
+	rootCmd.PersistentFlags().Bool("verbose", false, "Verbose output")
+}
