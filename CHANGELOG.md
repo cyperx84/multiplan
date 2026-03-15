@@ -1,0 +1,74 @@
+# Changelog
+
+## v0.2.0 (2026-03-15)
+
+### 🎉 Complete rewrite in Go
+
+- **Single binary** — No more Node.js runtime or npm dependencies
+- **Direct API calls** — HTTP requests to Claude, Gemini, Codex, GLM-5 (no CLI shelling)
+- **Faster startup** — Go binary vs Node.js interpreter
+
+### ✨ New Features
+
+#### Lens-based prompts
+Each model gets a **different planning angle** to maximize diversity:
+
+| Model | Lens |
+|-------|------|
+| Claude | Correctness & edge cases |
+| Gemini | Scale & operational simplicity |
+| Codex | Implementation speed |
+| GLM-5 | Failure analysis & critique |
+
+#### Eval → Convergence
+Plans are now **scored before final synthesis**:
+- Structural scorers run on all plans (coverage, specificity, actionability)
+- Scores are injected into the convergence prompt
+- Higher-scoring plans are weighted more heavily in the final synthesis
+
+#### Streaming progress
+See which models finish first via goroutines + channels (parallel execution with real-time feedback).
+
+### 🔧 Technical Changes
+
+- **Language**: TypeScript → Go
+- **HTTP client**: Direct `net/http` calls (no child processes)
+- **CLI framework**: `commander` → `cobra`
+- **Tests**: Node.js test runner → Go testing
+- **Build**: `npm run build` → `go build`
+
+### 📦 Installation
+
+```bash
+# Go install
+go install github.com/cyperx84/multiplan@latest
+
+# Build from source
+git clone https://github.com/cyperx84/multiplan
+cd multiplan
+go build -o multiplan .
+```
+
+### ⚠️ Breaking Changes
+
+- **API keys via environment variables** (not CLI tools):
+  - `ANTHROPIC_API_KEY` for Claude
+  - `GOOGLE_AI_API_KEY` or `GEMINI_API_KEY` for Gemini
+  - `OPENAI_API_KEY` for Codex
+  - `ZAI_API_KEY` for GLM-5
+- No more `claude`, `gemini`, `codex` CLI dependencies
+- Homebrew formula changed from npm to Go binary
+
+### 🧪 Testing
+
+```bash
+go test ./...
+```
+
+All structural eval scorers, config helpers, and lens prompt generation are covered.
+
+---
+
+## v0.1.0 (2024-03-15)
+
+Initial TypeScript release with 4-model parallel planning, cross-examination, and structural eval framework.
