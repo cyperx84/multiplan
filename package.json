@@ -1,19 +1,54 @@
 {
   "name": "multiplan",
   "version": "0.1.0",
-  "description": "4-model parallel planning workflow with eval framework",
-  "author": "CyperX",
+  "description": "4-model parallel planning workflow with eval framework — Claude, Gemini, Codex, GLM-5",
+  "author": "CyperX <cyperx84@gmail.com>",
   "license": "MIT",
+  "homepage": "https://github.com/cyperx84/multiplan",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cyperx84/multiplan.git"
+  },
+  "bugs": {
+    "url": "https://github.com/cyperx84/multiplan/issues"
+  },
+  "keywords": [
+    "ai",
+    "planning",
+    "multi-model",
+    "llm",
+    "claude",
+    "gemini",
+    "codex",
+    "glm",
+    "eval",
+    "cli",
+    "agent"
+  ],
   "type": "module",
+  "main": "./dist/planner.js",
+  "exports": {
+    ".": "./dist/planner.js",
+    "./eval": "./dist/eval/index.js",
+    "./models": "./dist/models/index.js"
+  },
   "bin": {
     "multiplan": "./dist/cli.js"
   },
+  "files": [
+    "dist/",
+    "src/prompts/",
+    "eval/",
+    "scripts/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
     "test": "npm run build && node --test dist/eval/scorers/scorers.test.js",
     "test:unit": "node --test dist/eval/scorers/scorers.test.js",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build && npm test"
   },
   "dependencies": {
     "commander": "^12.0.0"
