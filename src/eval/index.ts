@@ -32,7 +32,8 @@ export async function evalPlan(
 
 export async function evalRun(
   runDir: string,
-  evalCase: EvalCase
+  evalCase: EvalCase,
+  opts?: { judge?: string }
 ): Promise<Record<string, EvalReport>> {
   const reports: Record<string, EvalReport> = {};
 
@@ -45,7 +46,7 @@ export async function evalRun(
         const filePath = join(runDir, file);
         const content = await fs.readFile(filePath, 'utf-8');
 
-        const report = await evalPlan(content, evalCase);
+        const report = await evalPlan(content, evalCase, opts);
         report.model = modelId;
         reports[modelId] = report;
       }
@@ -55,7 +56,7 @@ export async function evalRun(
     try {
       const finalPath = join(runDir, 'final-plan.md');
       const finalContent = await fs.readFile(finalPath, 'utf-8');
-      const report = await evalPlan(finalContent, evalCase);
+      const report = await evalPlan(finalContent, evalCase, opts);
       report.model = 'final';
       reports.final = report;
     } catch {

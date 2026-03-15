@@ -1,207 +1,245 @@
 # multiplan
 
-A 4-model parallel planning workflow with evaluation framework. Get superior technical plans by running Claude, Gemini, Codex, and GLM-5 in parallel, then cross-examining and synthesizing the results.
+**4-model parallel planning workflow with eval framework.**
 
-## What it is
+Run a task through Claude (Opus), Gemini, Codex (GPT-5.4), and GLM-5 simultaneously. Each produces an independent plan. Then cross-examine them. Then converge on the best synthesis.
 
-**multiplan** orchestrates three phases:
-1. **Parallel Planning** — All 4 models generate independent technical plans
-2. **Cross-Examination** — A model analyzes agreements, disagreements, and unique insights
-3. **Convergence** — A model synthesizes the best ideas into one unified final plan
+Kill model selection anxiety. Get plans that have been stress-tested before a single line of code is written.
 
-Each plan is immediately actionable — someone can hand it to a developer and start building.
+---
 
-## Installation
+## Install
 
 ```bash
 npm install -g multiplan
 ```
 
-Or install from source:
+Or run from source:
 ```bash
-git clone https://github.com/cyperx84/multiplan.git
-cd multiplan
-npm install
-npm run build
-npm install -g .
+git clone https://github.com/cyperx84/multiplan
+cd multiplan && npm install && npm run build
+npm link
 ```
+
+---
 
 ## Quick start
 
 ```bash
-# Generate a plan for a rate limiting system
-multiplan plan "Design a rate limiting system for a REST API" \
-  --req "Support per-user and per-IP limits" \
-  --con "Use Redis for state"
+# Run planning on any task
+multiplan "Design a rate limiting system for the API"
 
-# Evaluate the final plan against a fixture
-multiplan eval ~/.multiplan/runs/LATEST/final-plan.md \
-  --fixture eval/fixtures/rate-limiter.json
+# With requirements and constraints
+multiplan "Build a real-time notification system" \
+  --req "Must support 10k concurrent users, WebSocket-based" \
+  --con "No new infrastructure — use existing Redis + Postgres"
+
+# Evaluate the output
+multiplan eval ~/.multiplan/runs/LATEST/final-plan.md
 ```
+
+---
 
 ## How it works
 
-### Phase 1: Parallel Planning
-All available models receive the same planning prompt and generate independent technical plans. Plans are written to disk immediately.
+**Phase 1 — Independent planning (parallel)**
+All four models receive the same task spec. Each produces a complete plan with no cross-contamination. They run concurrently — total time ≈ slowest model.
 
-**Models:**
-- **Claude (Opus)** — Best architectural thinking, clear reasoning
-- **Gemini** — Fast, practical implementations, good cost/quality
-- **Codex (GPT)** — Production experience, familiar patterns
-- **GLM-5 (ZhipuAI)** — Unique perspective, sometimes brilliant at trade-offs
+**Phase 2 — Cross-examination**
+One model (default: Claude) reviews all four plans: what each gets right, what each misses, where they agree, where they disagree.
 
-### Phase 2: Cross-Examination (Debate)
-One model (default: Claude) analyzes all 4 plans side-by-side:
-- What each plan gets right
-- What it misses or gets wrong
-- Where all plans agree (safe bets)
-- Where they disagree (contested territory)
-- The single best unique idea from each plan
-- Critical gaps all 4 missed
+**Phase 3 — Convergence**
+Final synthesis: best ideas from all four, disagreements resolved, gaps filled. One actionable, validated plan.
 
-### Phase 3: Convergence (Synthesis)
-Another model (default: Claude) produces the final unified plan:
-- Takes the best ideas from each plan
-- Resolves disagreements with clear justification
-- Fills gaps identified in debate
-- Output is immediately buildable
+Output directory: `~/.multiplan/runs/<timestamp>/`
 
-## Evaluation Framework
+| File | Contents |
+|------|----------|
+| `plan-claude.md` | Claude Opus plan |
+| `plan-gemini.md` | Gemini plan |
+| `plan-codex.md` | Codex/GPT plan |
+| `plan-glm5.md` | GLM-5 plan |
+| `debate.md` | Cross-examination |
+| `final-plan.md` | ✅ Start here |
 
-**multiplan** includes a scoring framework for evaluating plan quality:
+---
 
-```bash
-# Score a single plan
-multiplan eval my-plan.md --fixture eval/fixtures/rate-limiter.json
+## CLI reference
 
-# Score all plans in a run
-multiplan eval ~/.multiplan/runs/LATEST --fixture eval/fixtures/rate-limiter.json
-
-# Include LLM judge (calls model to grade 0-10)
-multiplan eval my-plan.md --fixture eval/fixtures/rate-limiter.json --judge claude
-
-# Output as JSON
-multiplan eval my-plan.md --fixture eval/fixtures/rate-limiter.json --json
+```
+multiplan <task> [options]
+multiplan plan <task> [options]
+multiplan eval <file-or-dir> [options]
+multiplan skill
+multiplan integrations [--claude-code] [--codex]
 ```
 
-**Scorers:**
-- **Coverage** (0-1) — Presence of required sections: Overview, Architecture, Implementation, Trade-offs
-- **Specificity** (0-1) — Ratio of concrete (tech names, numbers) to vague tokens ("might", "could")
-- **Actionable** (0-1) — Presence of numbered steps, code blocks, commands
-- **LLM Judge** (0-10) — Model grades on completeness, concreteness, risk awareness, implementability
+### Options
 
-**Eval Fixtures:**
+| Flag | Description |
+|------|-------------|
+| `--req <text>` | Requirements |
+| `--con <text>` | Constraints |
+| `--out <dir>` | Output directory |
+| `--models <list>` | Comma-separated: `claude,gemini,codex,glm5` |
+| `--debate-model` | Model for cross-examination phase |
+| `--converge-model` | Model for convergence phase |
+| `--timeout <ms>` | Per-model timeout (default: 120000) |
+| `--verbose` | Extra logging |
+
+### Eval options
+
+```bash
+# Eval a single plan file
+multiplan eval ~/.multiplan/runs/LATEST/final-plan.md
+
+# Eval all plans in a run directory
+multiplan eval ~/.multiplan/runs/LATEST/
+
+# Use a fixture (expected topics + min score threshold)
+multiplan eval ~/.multiplan/runs/LATEST/ --fixture eval/fixtures/rate-limiter.json
+
+# Choose LLM judge model
+multiplan eval final-plan.md --judge gemini
+
+# Skip LLM judge (fast, structural only)
+multiplan eval final-plan.md --no-judge
+
+# JSON output
+multiplan eval final-plan.md --json
+```
+
+---
+
+## Eval framework
+
+The eval system scores plans on two axes:
+
+### Structural scorers (fast, no model calls)
+
+| Scorer | What it measures |
+|--------|-----------------|
+| **Coverage** | Required sections present (Overview, Architecture, Implementation, Trade-offs) |
+| **Specificity** | Ratio of concrete terms (tech names, numbers, commands) vs vague language ("might", "could", "perhaps") |
+| **Actionable** | Numbered steps, code blocks, concrete commands |
+
+### LLM Judge (calls a model)
+
+Grades the plan 0-10 on: completeness, concreteness, risk awareness, implementability. Returns `overall` as the judge score.
+
+### Fixtures
+
+Pre-built eval cases in `eval/fixtures/*.json`:
+
 ```json
 {
-  "task": "Design a rate limiting system",
-  "requirements": "Per-user and per-IP limits",
-  "constraints": "Use Redis for state",
+  "task": "Design a rate limiting system for a REST API",
+  "requirements": "Per-user and per-IP limits, sliding window",
+  "constraints": "Redis only",
   "expectedTopics": ["Redis", "sliding window", "middleware"],
   "minScore": 6
 }
 ```
 
-## Configuration
+### Use as a module
 
-### Models
+```typescript
+import { run } from 'multiplan';
+import { evalPlan, evalRun } from 'multiplan/eval';
 
-Each model requires specific setup:
+// Run planning
+const result = await run({
+  task: 'Design a rate limiting system',
+  requirements: 'Per-user limits',
+  constraints: 'Redis only',
+});
 
-| Model | Setup | Key/Auth |
-|-------|-------|----------|
-| Claude | CLI: `claude` binary | Requires Claude Code or shell access |
-| Gemini | CLI: `gemini` binary | Requires Gemini CLI |
-| Codex | CLI: `codex` binary | Requires Codex shell |
-| GLM-5 | HTTP API | `~/.openclaw/agents/main/agent/auth-profiles.json` or `$ZAI_API_KEY` env var |
+// Eval a single plan
+const report = await evalPlan(result.finalPlan, {
+  task: result.task,
+  expectedTopics: ['Redis', 'sliding window'],
+  minScore: 7,
+}, { judge: 'claude' });
 
-### Environment
+console.log(report.markdown);
+console.log(report.pass); // true/false
 
-```bash
-# GLM-5 API key (optional if in auth-profiles.json)
-export ZAI_API_KEY="your-key"
-
-# Disable specific models
-multiplan plan "..." --models claude,gemini
-
-# Set per-model timeout (default 120s)
-multiplan plan "..." --timeout 180000
-
-# Use different models for debate/convergence
-multiplan plan "..." --debate-model gemini --converge-model claude
-
-# Output to custom directory
-multiplan plan "..." --out /tmp/my-plan
-
-# Verbose logging
-multiplan plan "..." --verbose
+// Eval all plans in a run directory
+const reports = await evalRun(result.outputDir, {
+  task: result.task,
+  minScore: 6,
+});
 ```
 
-### .multiplanrc (future)
+---
+
+## Model auth
+
+| Model | Auth |
+|-------|------|
+| **Claude** | `claude` CLI — authenticated via Claude Code / `claude auth login` |
+| **Gemini** | `gemini` CLI — authenticated via `gemini auth login` |
+| **Codex** | `codex` CLI — authenticated via `codex auth login` |
+| **GLM-5** | Reads from `~/.openclaw/agents/main/agent/auth-profiles.json` (OpenClaw), or set `ZAI_API_KEY` env var |
+
+Models are auto-discovered at runtime. If a model is missing or fails, it's marked unavailable and skipped — planning continues with the remaining models.
+
+---
+
+## Config
+
+Create `~/.multiplanrc` or `.multiplanrc` in your project root:
 
 ```json
 {
-  "models": ["claude", "gemini", "codex", "glm5"],
+  "defaultModels": ["claude", "gemini", "glm5"],
+  "timeoutMs": 180000,
   "debateModel": "claude",
-  "convergeModel": "claude",
-  "outputDir": "~/.multiplan/runs",
-  "timeoutMs": 120000
+  "convergeModel": "claude"
 }
 ```
 
-## CLI Commands
-
-```bash
-# Plan
-multiplan plan <task> [--req <requirements>] [--con <constraints>] [--out <dir>] [--models <list>] [--verbose]
-
-# Evaluate
-multiplan eval <file-or-dir> [--fixture <path>] [--judge <model>] [--json]
-
-# Integrations
-multiplan skill         # Generate OpenClaw SKILL.md
-multiplan integrations  # Print integration snippets
-```
+---
 
 ## Integration
 
-### OpenClaw
+### OpenClaw skill
 
 ```bash
-multiplan skill > ~/openclaw/skills/multiplan/SKILL.md
+multiplan skill
 ```
 
-### Claude Code
+Generates/updates `~/openclaw/skills/multiplan/SKILL.md` so OpenClaw's AI can invoke multiplan directly.
 
-Add to `CLAUDE.md`:
-```
-## Multiplan Integration
-- Skill: `/multiplan "design rate limiter" --req "Redis" --con "..."`
-- Eval: `/multiplan-eval path/to/plan.md`
+### Claude Code (CLAUDE.md)
+
+```bash
+multiplan integrations --claude-code
 ```
 
-### Codex Agent
+Paste the output into your project's `CLAUDE.md`.
 
-Add to `.codex/agent.md`:
+### Codex (.codex/agent.md)
+
+```bash
+multiplan integrations --codex
 ```
-Multiplan is available. Use for:
-- Technical architecture planning
-- Evaluating plan quality
-- Cross-model synthesis
-```
+
+Paste into `.codex/agent.md` in your project.
+
+---
 
 ## Development
 
 ```bash
-# Build
-npm run build
-
-# Watch
-npm run dev
-
-# Test (structural scorers)
-npm test
+npm run build       # TypeScript compile
+npm run dev         # Watch mode
+npm test            # Build + run unit tests (no model calls)
+npm run test:unit   # Unit tests only (after build)
 ```
+
+---
 
 ## License
 
-MIT — Copyright © CyperX
+MIT — [CyperX](https://github.com/cyperx84)

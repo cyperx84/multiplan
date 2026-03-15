@@ -11,7 +11,9 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "test": "node --test dist/eval/scorers/*.test.js"
+    "test": "npm run build && node --test dist/eval/scorers/scorers.test.js",
+    "test:unit": "node --test dist/eval/scorers/scorers.test.js",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "commander": "^12.0.0"
