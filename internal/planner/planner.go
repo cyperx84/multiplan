@@ -1,10 +1,14 @@
 package planner
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -57,6 +61,24 @@ func Run(cfg *config.Config) (*RunResult, error) {
 		}
 	}
 
+	// Phase 0: Lattice mental model framing
+	var latticeModels []string
+	if !cfg.SkipLattice {
+		latticeCmd := cfg.LatticeCmd
+		if latticeCmd == "" {
+			latticeCmd = "lattice"
+		}
+		if _, err := exec.LookPath(latticeCmd); err == nil {
+			logf("[multiplan] Phase 0 — Lattice mental model framing...\n")
+			latticeModels = runLatticeFraming(latticeCmd, cfg.Task, outputDir, cfg.Verbose)
+			if len(latticeModels) > 0 {
+				logf("[multiplan]   ✓ Models: %s\n", strings.Join(latticeModels, ", "))
+			}
+		} else if cfg.Verbose {
+			log("[multiplan] Phase 0 — Skipped (lattice not on PATH)")
+		}
+	}
+
 	log("[multiplan] Run ID: %s", runID)
 	log("[multiplan] Output: %s", outputDir)
 
@@ -86,6 +108,12 @@ func Run(cfg *config.Config) (*RunResult, error) {
 
 			startTime := time.Now()
 			prompt := GetLensPrompt(id, cfg.Task, requirements, constraints)
+
+			// Inject lattice mental model framing if available
+			if len(latticeModels) > 0 {
+				prompt += "\n\nRelevant mental models: [" + strings.Join(latticeModels, ", ") + "]\nConsider these frameworks in your plan."
+			}
+
 			timeout := time.Duration(timeoutMs) * time.Millisecond
 
 			var plan string
@@ -266,4 +294,60 @@ func formatInt(n int) string {
 		result = append(result, c)
 	}
 	return string(result)
+}
+
+// latticeThinkResult is the JSON structure returned by `lattice think --json`.
+type latticeThinkResult struct {
+	Problem string `json:"problem"`
+	Models  []struct {
+		ModelName string `json:"model_name"`
+		ModelSlug string `json:"model_slug"`
+		Category  string `json:"category"`
+	} `json:"models"`
+	Summary string `json:"summary"`
+}
+
+func runLatticeFraming(latticeCmd, task, outputDir string, verbose bool) []string {
+	cmd := exec.Command(latticeCmd, "think", task, "--json")
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		if verbose {
+			fmt.Printf("[multiplan]   ✗ Lattice failed: %s\n", err)
+		}
+		return nil
+	}
+
+	var result latticeThinkResult
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		if verbose {
+			fmt.Printf("[multiplan]   ✗ Lattice JSON parse failed: %s\n", err)
+		}
+		return nil
+	}
+
+	var modelNames []string
+	for _, m := range result.Models {
+		modelNames = append(modelNames, m.ModelName)
+	}
+
+	// Write lattice framing to output dir
+	if len(modelNames) > 0 {
+		var framingBuf strings.Builder
+		framingBuf.WriteString("# Lattice Mental Model Framing\n\n")
+		framingBuf.WriteString(fmt.Sprintf("Problem: %s\n\n", task))
+		framingBuf.WriteString("## Models Applied\n\n")
+		for _, m := range result.Models {
+			framingBuf.WriteString(fmt.Sprintf("- **%s** (%s)\n", m.ModelName, m.Category))
+		}
+		if result.Summary != "" {
+			framingBuf.WriteString(fmt.Sprintf("\n## Synthesis\n\n%s\n", result.Summary))
+		}
+		_ = os.WriteFile(filepath.Join(outputDir, "lattice_framing.md"), []byte(framingBuf.String()), 0644)
+	}
+
+	return modelNames
 }

@@ -35,6 +35,8 @@ func runPlanCommand(cmd *cobra.Command, args []string) {
 		ConvergeModel: cmd.Flag("converge-model").Value.String(),
 		Verbose:       cmd.Flag("verbose").Value.String() == "true",
 		Quiet:         cmd.Flag("quiet").Value.String() == "true",
+		SkipLattice:   cmd.Flag("skip-lattice").Value.String() == "true",
+		LatticeCmd:    cmd.Flag("lattice-cmd").Value.String(),
 	}
 
 	// --json flag (plan subcommand only)

@@ -13,6 +13,8 @@ type Config struct {
 	Verbose       bool
 	Quiet         bool
 	JSON          bool
+	SkipLattice   bool
+	LatticeCmd    string
 }
 
 func (c *Config) GetRequirements() string {

@@ -39,4 +39,6 @@ func init() {
 	rootCmd.PersistentFlags().Int("timeout", 120000, "Per-model timeout in milliseconds")
 	rootCmd.PersistentFlags().Bool("verbose", false, "Verbose output")
 	rootCmd.PersistentFlags().Bool("quiet", false, "Suppress all progress output (errors and final result only)")
+	rootCmd.PersistentFlags().Bool("skip-lattice", false, "Skip lattice mental model framing (Phase 0)")
+	rootCmd.PersistentFlags().String("lattice-cmd", "lattice", "Lattice binary command")
 }
