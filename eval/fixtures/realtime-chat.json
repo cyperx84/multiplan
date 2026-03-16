@@ -1,0 +1,6 @@
+{
+  "task": "Build a real-time chat system supporting 100k concurrent users with message persistence",
+  "requirements": "WebSocket-based, message ordering guaranteed, presence indicators, message search",
+  "expectedTopics": ["websocket", "pubsub", "persistence", "scaling", "ordering", "presence"],
+  "minScore": 6.0
+}

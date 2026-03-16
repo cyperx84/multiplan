@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.4.0 (2026-03-16)
+
+### ✨ New Features
+
+#### Shared HTTP client with retry logic
+Extracted a shared `APIClient` in `internal/models/client.go` used by all 4 providers (Claude, Gemini, Codex/GPT, GLM-5). Eliminates ~80% HTTP code duplication across providers.
+
+#### Exponential backoff retry
+All provider HTTP calls now retry automatically on rate limits (429) and server errors (500, 502, 503, 504) with exponential backoff: 1s, 2s, 4s. Max 3 retries. Client errors (400, 401, 403, 404) are not retried.
+
+Verbose mode prints retry progress:
+```
+[retry] Claude: rate limited, retrying in 2s (attempt 2/3)
+```
+
+#### Better error messages
+API key missing and authentication errors now include actionable guidance:
+```
+Claude requires ANTHROPIC_API_KEY. Set it with: export ANTHROPIC_API_KEY=sk-...
+Gemini requires GOOGLE_AI_API_KEY or GEMINI_API_KEY. Get one at: https://aistudio.google.com/apikey
+```
+
+#### Planner unit tests
+Added `internal/planner/planner_test.go` with 6 test cases covering phase ordering, score weighting, output file creation, model failure handling, all-models-fail recovery, and debate failure recovery. Tests use mock providers — no real API calls required.
+
+#### New eval fixtures
+Added 4 new evaluation fixtures in `eval/fixtures/`: `auth-system.json`, `db-migration.json`, `realtime-chat.json`, `cicd-pipeline.json`.
+
+#### Clean `--version` output
+`multiplan --version` now outputs `multiplan v0.4.0` (previously used cobra's default verbose format).
+
+---
+
 ## v0.3.0 (2026-03-16)
 
 ### ✨ New Features

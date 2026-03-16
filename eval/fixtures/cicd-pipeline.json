@@ -1,0 +1,6 @@
+{
+  "task": "Design a CI/CD pipeline for a monorepo with 20 microservices and different deployment targets",
+  "requirements": "Selective builds based on changed services, canary deployments, automatic rollback on failure",
+  "expectedTopics": ["monorepo", "build", "deploy", "canary", "rollback", "testing", "cache"],
+  "minScore": 6.0
+}

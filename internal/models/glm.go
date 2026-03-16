@@ -1,12 +1,9 @@
 package models
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -33,6 +30,14 @@ func (g *GLMProvider) PlanWithTokens(ctx context.Context, prompt string, timeout
 		return "", 0, 0, err
 	}
 
+	client := &APIClient{
+		BaseURL:      "https://api.z.ai",
+		APIKey:       apiKey,
+		KeyHeader:    "Authorization",
+		KeyPrefix:    "Bearer ",
+		ProviderName: "GLM-5",
+	}
+
 	payload := map[string]interface{}{
 		"model": "glm-5",
 		"messages": []map[string]string{
@@ -42,33 +47,8 @@ func (g *GLMProvider) PlanWithTokens(ctx context.Context, prompt string, timeout
 		"temperature": 0.7,
 	}
 
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return "", 0, 0, err
-	}
-
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.z.ai/api/coding/paas/v4/chat/completions", bytes.NewReader(data))
-	if err != nil {
-		return "", 0, 0, err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", 0, 0, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return "", 0, 0, fmt.Errorf("GLM-5 API error: %s - %s", resp.Status, string(body))
-	}
 
 	var result struct {
 		Choices []struct {
@@ -82,12 +62,12 @@ func (g *GLMProvider) PlanWithTokens(ctx context.Context, prompt string, timeout
 		} `json:"usage"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := client.Post(ctx, "/api/coding/paas/v4/chat/completions", payload, &result); err != nil {
 		return "", 0, 0, err
 	}
 
 	if len(result.Choices) == 0 {
-		return "", 0, 0, fmt.Errorf("no content in response")
+		return "", 0, 0, fmt.Errorf("no content in GLM-5 response")
 	}
 
 	return result.Choices[0].Message.Content, result.Usage.PromptTokens, result.Usage.CompletionTokens, nil
@@ -103,7 +83,7 @@ func (g *GLMProvider) getAPIKey() (string, error) {
 
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("could not get home directory")
+		return "", fmt.Errorf("GLM-5 requires ZAI_API_KEY. Get one at: https://open.bigmodel.cn")
 	}
 
 	paths := []string{
@@ -132,5 +112,5 @@ func (g *GLMProvider) getAPIKey() (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("ZAI API key not found. Set ZAI_API_KEY env var or ensure ~/.openclaw/agents/main/agent/auth-profiles.json has zai:default profile")
+	return "", fmt.Errorf("GLM-5 requires ZAI_API_KEY. Get one at: https://open.bigmodel.cn")
 }

@@ -12,7 +12,8 @@ var rootCmd = &cobra.Command{
 	Short: "4-model parallel planning workflow with eval framework",
 	Long: `multiplan runs a task through Claude (Opus), Gemini, Codex (GPT), and GLM-5 simultaneously.
 Each produces an independent plan. Then cross-examine them. Then converge on the best synthesis.`,
-	Version: "0.3.0",
+	Version: "0.4.0",
+
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) > 0 {
 			runPlanCommand(cmd, args)
@@ -30,6 +31,9 @@ func Execute() {
 }
 
 func init() {
+	// Clean version output: "multiplan v0.4.0"
+	rootCmd.SetVersionTemplate("multiplan v{{.Version}}\n")
+
 	rootCmd.PersistentFlags().String("req", "", "Requirements")
 	rootCmd.PersistentFlags().String("con", "", "Constraints")
 	rootCmd.PersistentFlags().String("out", "", "Output directory")

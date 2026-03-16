@@ -26,6 +26,32 @@ type RunResult struct {
 	FinalPlan string
 }
 
+// configProviderAdapter wraps a config.Provider so it satisfies models.Provider.
+type configProviderAdapter struct {
+	p config.Provider
+}
+
+func (a *configProviderAdapter) ID() string   { return a.p.ID() }
+func (a *configProviderAdapter) Name() string { return a.p.Name() }
+func (a *configProviderAdapter) Available(ctx context.Context) bool {
+	return a.p.Available(ctx)
+}
+func (a *configProviderAdapter) Plan(ctx context.Context, prompt string, timeout time.Duration) (string, error) {
+	return a.p.Plan(ctx, prompt, timeout)
+}
+
+// getProvider returns a models.Provider using the factory (if set) or global registry.
+func getProvider(cfg *config.Config, id string) (models.Provider, bool) {
+	if cfg.ProviderFactory != nil {
+		p, ok := cfg.ProviderFactory(id)
+		if !ok {
+			return nil, false
+		}
+		return &configProviderAdapter{p}, true
+	}
+	return models.GetProvider(id)
+}
+
 // Run executes the full 3-phase multiplan pipeline.
 func Run(cfg *config.Config) (*RunResult, error) {
 	ctx := context.Background()
@@ -101,7 +127,7 @@ func Run(cfg *config.Config) (*RunResult, error) {
 		go func(id string) {
 			defer wg.Done()
 
-			provider, ok := models.GetProvider(id)
+			provider, ok := getProvider(cfg, id)
 			if !ok {
 				return
 			}
@@ -162,14 +188,12 @@ func Run(cfg *config.Config) (*RunResult, error) {
 	// Stream progress as each model finishes.
 	for r := range resultChan {
 		if cfg.Verbose {
-			// Already printed inside goroutine in verbose mode; add summary line.
 			if r.Error == "" {
 				log("[multiplan]   ✓ %s done (%dms)", r.ModelName, r.DurationMs)
 			} else {
 				log("[multiplan]   ✗ %s failed: %s", r.ModelName, r.Error)
 			}
 		} else {
-			// Default: simple progress line (suppressed only if --quiet).
 			durationSec := float64(r.DurationMs) / 1000.0
 			if r.Error == "" {
 				logf("⏳ %s... done (%.1fs)\n", r.ModelName, durationSec)
@@ -202,20 +226,26 @@ func Run(cfg *config.Config) (*RunResult, error) {
 	// ── Phase 2: Debate ──────────────────────────────────────────────────────
 	log("[multiplan] Phase 2 — Cross-examination...")
 
-	debateProvider, ok := models.GetProvider(cfg.DebateModel)
+	debateProvider, ok := getProvider(cfg, cfg.DebateModel)
 	if !ok {
-		debateProvider, _ = models.GetProvider("claude")
+		debateProvider, _ = getProvider(cfg, "claude")
 	}
 
 	debatePrompt := GetDebatePrompt(cfg.Task, planTexts)
 	timeout := time.Duration(timeoutMs) * time.Millisecond
 
-	debate, err := debateProvider.Plan(ctx, debatePrompt, timeout)
-	if err != nil {
-		debate = fmt.Sprintf("[Debate failed: %s]", err.Error())
-		log("[multiplan]   ✗ Debate failed: %s", err.Error())
+	var debate string
+	if debateProvider != nil {
+		var err error
+		debate, err = debateProvider.Plan(ctx, debatePrompt, timeout)
+		if err != nil {
+			debate = fmt.Sprintf("[Debate failed: %s]", err.Error())
+			log("[multiplan]   ✗ Debate failed: %s", err.Error())
+		} else {
+			log("[multiplan]   ✓ Debate complete (via %s)", debateProvider.Name())
+		}
 	} else {
-		log("[multiplan]   ✓ Debate complete (via %s)", debateProvider.Name())
+		debate = "[Debate skipped: no provider available]"
 	}
 
 	if err := os.WriteFile(filepath.Join(outputDir, "debate.md"), []byte(debate), 0644); err != nil {
@@ -225,18 +255,24 @@ func Run(cfg *config.Config) (*RunResult, error) {
 	// ── Phase 3: Convergence ─────────────────────────────────────────────────
 	log("[multiplan] Phase 3 — Convergence with eval scores...")
 
-	convergeProvider, ok := models.GetProvider(cfg.ConvergeModel)
+	convergeProvider, ok := getProvider(cfg, cfg.ConvergeModel)
 	if !ok {
-		convergeProvider, _ = models.GetProvider("claude")
+		convergeProvider, _ = getProvider(cfg, "claude")
 	}
 
 	convergePrompt := GetConvergePrompt(cfg.Task, planTexts, debate, planScores)
-	finalPlan, err := convergeProvider.Plan(ctx, convergePrompt, timeout)
-	if err != nil {
-		finalPlan = fmt.Sprintf("[Convergence failed: %s]", err.Error())
-		log("[multiplan]   ✗ Convergence failed: %s", err.Error())
+	var finalPlan string
+	if convergeProvider != nil {
+		var err error
+		finalPlan, err = convergeProvider.Plan(ctx, convergePrompt, timeout)
+		if err != nil {
+			finalPlan = fmt.Sprintf("[Convergence failed: %s]", err.Error())
+			log("[multiplan]   ✗ Convergence failed: %s", err.Error())
+		} else {
+			log("[multiplan]   ✓ Convergence complete (via %s)", convergeProvider.Name())
+		}
 	} else {
-		log("[multiplan]   ✓ Convergence complete (via %s)", convergeProvider.Name())
+		finalPlan = "[Convergence skipped: no provider available]"
 	}
 
 	// Build header and full plan.
@@ -285,7 +321,6 @@ func generateRunID() string {
 // formatInt formats an integer with comma separators.
 func formatInt(n int) string {
 	s := fmt.Sprintf("%d", n)
-	// Insert commas every 3 digits from right.
 	result := []byte{}
 	for i, c := range []byte(s) {
 		if i > 0 && (len(s)-i)%3 == 0 {

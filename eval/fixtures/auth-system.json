@@ -1,0 +1,6 @@
+{
+  "task": "Design an authentication and authorization system for a multi-tenant SaaS application",
+  "requirements": "Support OAuth2, API keys, role-based access control, and session management",
+  "expectedTopics": ["oauth", "jwt", "rbac", "session", "tenant", "middleware", "rate limit"],
+  "minScore": 6.0
+}

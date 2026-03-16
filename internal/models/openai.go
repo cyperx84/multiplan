@@ -1,12 +1,8 @@
 package models
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"time"
 )
@@ -28,7 +24,15 @@ func (c *CodexProvider) Plan(ctx context.Context, prompt string, timeout time.Du
 func (c *CodexProvider) PlanWithTokens(ctx context.Context, prompt string, timeout time.Duration) (string, int, int, error) {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
-		return "", 0, 0, fmt.Errorf("OPENAI_API_KEY not set")
+		return "", 0, 0, fmt.Errorf("Codex/GPT requires OPENAI_API_KEY. Set it with: export OPENAI_API_KEY=sk-...")
+	}
+
+	client := &APIClient{
+		BaseURL:      "https://api.openai.com",
+		APIKey:       apiKey,
+		KeyHeader:    "Authorization",
+		KeyPrefix:    "Bearer ",
+		ProviderName: "OpenAI",
 	}
 
 	payload := map[string]interface{}{
@@ -40,33 +44,8 @@ func (c *CodexProvider) PlanWithTokens(ctx context.Context, prompt string, timeo
 		"temperature": 0.7,
 	}
 
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return "", 0, 0, err
-	}
-
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.openai.com/v1/chat/completions", bytes.NewReader(data))
-	if err != nil {
-		return "", 0, 0, err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", 0, 0, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return "", 0, 0, fmt.Errorf("openai API error: %s - %s", resp.Status, string(body))
-	}
 
 	var result struct {
 		Choices []struct {
@@ -80,12 +59,12 @@ func (c *CodexProvider) PlanWithTokens(ctx context.Context, prompt string, timeo
 		} `json:"usage"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := client.Post(ctx, "/v1/chat/completions", payload, &result); err != nil {
 		return "", 0, 0, err
 	}
 
 	if len(result.Choices) == 0 {
-		return "", 0, 0, fmt.Errorf("no content in response")
+		return "", 0, 0, fmt.Errorf("no content in OpenAI response")
 	}
 
 	return result.Choices[0].Message.Content, result.Usage.PromptTokens, result.Usage.CompletionTokens, nil

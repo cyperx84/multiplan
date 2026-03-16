@@ -1,7 +1,7 @@
 class Multiplan < Formula
   desc "4-model parallel planning workflow with lens-based prompts and eval framework"
   homepage "https://github.com/cyperx84/multiplan"
-  url "https://github.com/cyperx84/multiplan/archive/refs/tags/v0.3.0.tar.gz"
+  url "https://github.com/cyperx84/multiplan/archive/refs/tags/v0.4.0.tar.gz"
   sha256 "PLACEHOLDER_UPDATE_AFTER_RELEASE"
   license "MIT"
 
@@ -12,6 +12,6 @@ class Multiplan < Formula
   end
 
   test do
-    assert_match "0.3.0", shell_output("#{bin}/multiplan --version 2>&1")
+    assert_match "0.4.0", shell_output("#{bin}/multiplan --version 2>&1")
   end
 end

@@ -1,12 +1,8 @@
 package models
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"time"
 )
@@ -31,10 +27,16 @@ func (g *GeminiProvider) PlanWithTokens(ctx context.Context, prompt string, time
 		apiKey = os.Getenv("GEMINI_API_KEY")
 	}
 	if apiKey == "" {
-		return "", 0, 0, fmt.Errorf("GOOGLE_AI_API_KEY or GEMINI_API_KEY not set")
+		return "", 0, 0, fmt.Errorf("Gemini requires GOOGLE_AI_API_KEY or GEMINI_API_KEY. Get one at: https://aistudio.google.com/apikey")
 	}
 
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=%s", apiKey)
+	// Gemini uses key as query param, not header
+	path := fmt.Sprintf("/v1beta/models/gemini-2.0-flash-exp:generateContent?key=%s", apiKey)
+
+	client := &APIClient{
+		BaseURL:      "https://generativelanguage.googleapis.com",
+		ProviderName: "Gemini",
+	}
 
 	payload := map[string]interface{}{
 		"contents": []map[string]interface{}{
@@ -50,32 +52,8 @@ func (g *GeminiProvider) PlanWithTokens(ctx context.Context, prompt string, time
 		},
 	}
 
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return "", 0, 0, err
-	}
-
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
-	if err != nil {
-		return "", 0, 0, err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", 0, 0, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return "", 0, 0, fmt.Errorf("gemini API error: %s - %s", resp.Status, string(body))
-	}
 
 	var result struct {
 		Candidates []struct {
@@ -91,12 +69,12 @@ func (g *GeminiProvider) PlanWithTokens(ctx context.Context, prompt string, time
 		} `json:"usageMetadata"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := client.Post(ctx, path, payload, &result); err != nil {
 		return "", 0, 0, err
 	}
 
 	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
-		return "", 0, 0, fmt.Errorf("no content in response")
+		return "", 0, 0, fmt.Errorf("no content in Gemini response")
 	}
 
 	return result.Candidates[0].Content.Parts[0].Text,

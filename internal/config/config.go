@@ -1,5 +1,18 @@
 package config
 
+import (
+	"context"
+	"time"
+)
+
+// Provider mirrors models.Provider to avoid import cycles.
+type Provider interface {
+	ID() string
+	Name() string
+	Available(ctx context.Context) bool
+	Plan(ctx context.Context, prompt string, timeout time.Duration) (string, error)
+}
+
 // Config holds all runtime configuration for a multiplan run.
 type Config struct {
 	Task          string
@@ -15,6 +28,9 @@ type Config struct {
 	JSON          bool
 	SkipLattice   bool
 	LatticeCmd    string
+	// ProviderFactory is optional. If set, the planner calls it to get providers
+	// instead of the global registry. Used in tests to inject mock providers.
+	ProviderFactory func(id string) (Provider, bool)
 }
 
 func (c *Config) GetRequirements() string {

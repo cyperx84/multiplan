@@ -1,0 +1,6 @@
+{
+  "task": "Plan a zero-downtime database migration from PostgreSQL 14 to PostgreSQL 16 with schema changes",
+  "requirements": "10TB database, 50k queries/sec, cannot have more than 100ms downtime",
+  "expectedTopics": ["replication", "schema", "rollback", "cutover", "monitoring", "backup"],
+  "minScore": 6.0
+}
