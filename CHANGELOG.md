@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.3.0 (2026-03-16)
+
+### ✨ New Features
+
+#### Streaming progress output
+Default (non-verbose) mode now prints a progress line as each model completes:
+```
+⏳ Claude (Opus)... done (4.2s)
+⏳ Gemini... done (3.1s)
+```
+
+#### `--quiet` flag
+New global flag to suppress all progress output. Only errors and the final result are printed.
+
+#### `--json` flag for `plan` command
+Output a structured JSON object including run_id, output_dir, model excerpts, durations, debate excerpt, and the final plan.
+
+#### Config file support
+Load settings from `.multiplan.yml` (current directory) or `$HOME/.config/multiplan/config.yml`. CLI flags always override config file values. Supported fields: `models`, `debate_model`, `converge_model`, `timeout_ms`, `output_dir`, `requirements`, `constraints`.
+
+#### Token cost tracking
+Each model call now extracts token counts from API responses. At the end of a run, a cost summary is printed:
+```
+📊 Token usage: 45,230 input / 12,450 output (~$0.85 estimated)
+```
+Pricing used: Claude $15/$75 per 1M, Gemini $1.25/$5 per 1M, GPT-4o $2.50/$10 per 1M, GLM-5 $1/$2 per 1M.
+
+#### LLM judge: any model
+The `--judge` flag on `eval` now accepts `claude`, `gemini`, `codex`, or `glm5`.
+
+### 🔧 Technical Changes
+
+- `ModelResult` extended with `InputTokens` and `OutputTokens` fields
+- New `ProviderWithTokens` interface implemented by all 4 providers
+- New `internal/config/loader.go` for YAML config file loading
+- CI updated to Go (was accidentally using Node.js steps)
+
+---
+
 ## v0.2.0 (2026-03-15)
 
 ### 🎉 Complete rewrite in Go

@@ -1,5 +1,6 @@
 package config
 
+// Config holds all runtime configuration for a multiplan run.
 type Config struct {
 	Task          string
 	Requirements  string
@@ -10,6 +11,8 @@ type Config struct {
 	ConvergeModel string
 	TimeoutMs     int
 	Verbose       bool
+	Quiet         bool
+	JSON          bool
 }
 
 func (c *Config) GetRequirements() string {

@@ -5,142 +5,187 @@
 ```bash
 git clone https://github.com/cyperx84/multiplan.git
 cd multiplan
-npm install
-npm run build
+go build -o multiplan .
 ```
+
+Requires Go 1.22+.
 
 ## Building
 
 ```bash
-# TypeScript → JavaScript
-npm run build
+# Build binary
+go build -o multiplan .
 
-# Watch mode
-npm run dev
+# Install to $GOPATH/bin
+go install .
+```
 
-# Tests
-npm test
+## Testing
+
+```bash
+# Run all tests
+go test ./...
+
+# Run tests with verbose output
+go test -v ./...
+
+# Run a specific package
+go test ./internal/config/...
+```
+
+## Linting
+
+```bash
+go vet ./...
 ```
 
 ## Project Structure
 
 ```
-src/
-├── cli.ts                  # Command-line interface (commander)
-├── planner.ts              # Core orchestration (3 phases)
-├── models/                 # Model adapters
-│   ├── types.ts           # ModelAdapter interface
-│   ├── claude.ts          # Claude adapter
-│   ├── gemini.ts          # Gemini adapter
-│   ├── codex.ts           # Codex adapter
-│   ├── glm.ts             # GLM-5 adapter
-│   └── index.ts           # Model registry
-├── prompts/               # Prompt templates
-│   ├── plan.md            # Planning prompt
-│   ├── debate.md          # Cross-examination prompt
-│   ├── converge.md        # Synthesis prompt
-│   └── loader.ts          # Template rendering
-└── eval/                  # Evaluation framework
-    ├── types.ts           # EvalCase, EvalReport types
-    ├── runner.ts          # Scorer runner + report builder
-    ├── index.ts           # evalPlan() and evalRun()
-    └── scorers/
-        ├── coverage.ts    # Section coverage scorer
-        ├── specificity.ts # Concrete vs vague language scorer
-        ├── actionable.ts  # Numbered steps, code blocks scorer
-        └── llm-judge.ts   # LLM-based grading scorer
+main.go                    → Entrypoint
+cmd/
+  root.go                  → Root Cobra command + persistent flags
+  plan.go                  → plan subcommand (--json, --quiet, etc.)
+  eval.go                  → eval subcommand
+internal/
+  config/
+    config.go              → Config struct + helper methods
+    loader.go              → Load .multiplan.yml config file
+  planner/
+    planner.go             → Core 3-phase orchestration (parallel → debate → converge)
+    lenses.go              → Lens-based prompts for each model
+  models/
+    provider.go            → Provider + ProviderWithTokens interfaces, ModelResult, cost helpers
+    anthropic.go           → Claude (Opus) adapter
+    google.go              → Gemini adapter
+    openai.go              → Codex (GPT-4o) adapter
+    glm.go                 → GLM-5 (ZhipuAI) adapter
+  eval/
+    types.go               → EvalCase, EvalReport, Scorer interface
+    structural.go          → Structural scorers (length, headers, etc.)
+    judge.go               → LLM judge scorer (any provider)
+    eval.go                → EvalPlan runner + report generation
+eval/
+  fixtures/                → Sample eval fixture JSON files
+homebrew/
+  multiplan.rb             → Homebrew formula
 ```
 
 ## Adding a New Model
 
-1. Create `src/models/new-model.ts`:
+1. Create `internal/models/myprovider.go` and implement the `Provider` interface:
 
-```typescript
-import { ModelAdapter } from './types.js';
+```go
+package models
 
-export class NewModelAdapter implements ModelAdapter {
-  id = 'newmodel';
-  name = 'New Model';
+import (
+    "context"
+    "time"
+)
 
-  async available(): Promise<boolean> {
-    // Check if the model is available
-    return true;
-  }
+type MyProvider struct{}
 
-  async plan(prompt: string, timeoutMs?: number): Promise<string> {
-    // Implement planning logic
-    // Call external API or CLI, pipe prompt, return response
-  }
+func (m *MyProvider) ID() string   { return "myprovider" }
+func (m *MyProvider) Name() string { return "My Provider" }
+
+func (m *MyProvider) Available(ctx context.Context) bool {
+    return os.Getenv("MY_API_KEY") != ""
+}
+
+func (m *MyProvider) Plan(ctx context.Context, prompt string, timeout time.Duration) (string, error) {
+    text, _, _, err := m.PlanWithTokens(ctx, prompt, timeout)
+    return text, err
+}
+
+// PlanWithTokens implements ProviderWithTokens for cost tracking.
+func (m *MyProvider) PlanWithTokens(ctx context.Context, prompt string, timeout time.Duration) (string, int, int, error) {
+    // ... make HTTP call, return (text, inputTokens, outputTokens, err)
 }
 ```
 
-2. Register in `src/models/index.ts`:
+2. Register it in `provider.go`:
 
-```typescript
-import { NewModelAdapter } from './new-model.js';
-
-const adapters: Record<string, ModelAdapter> = {
-  // ...
-  newmodel: new NewModelAdapter(),
-};
+```go
+var providers = map[string]Provider{
+    // ... existing providers ...
+    "myprovider": &MyProvider{},
+}
 ```
+
+3. Add pricing in `provider.go`:
+
+```go
+var ModelPricing = map[string]TokenCost{
+    // ... existing ...
+    "myprovider": {InputPer1M: 1.0, OutputPer1M: 3.0},
+}
+```
+
+4. Add a lens-based prompt for it in `internal/planner/lenses.go`.
+
+5. Write tests in `internal/models/myprovider_test.go`.
 
 ## Adding a New Scorer
 
-1. Create `src/eval/scorers/new-scorer.ts`:
+Scorers live in `internal/eval/structural.go`. Each scorer implements the `Scorer` interface:
 
-```typescript
-import { EvalCase, Scorer } from '../types.js';
-
-export const newScorer: Scorer = {
-  name: 'New Scorer',
-  max: 1,  // or 10 for LLM scorers
-  async score(text: string, evalCase: EvalCase): Promise<number> {
-    // Implement scoring logic
-    // Return score between 0 and max
-  },
-};
+```go
+type Scorer interface {
+    Name() string
+    Max() float64
+    Score(text string, evalCase *EvalCase) (float64, error)
+}
 ```
 
-2. Add to defaults in `src/eval/index.ts`:
+Example:
 
-```typescript
-import { newScorer } from './scorers/new-scorer.js';
+```go
+type MyScorer struct{}
 
-const DEFAULT_SCORERS = [
-  // ...
-  newScorer,
-];
+func (s *MyScorer) Name() string { return "My Scorer" }
+func (s *MyScorer) Max() float64 { return 10.0 }
+
+func (s *MyScorer) Score(text string, evalCase *EvalCase) (float64, error) {
+    // Analyze text and return score 0..10
+    return 7.5, nil
+}
 ```
 
-## Testing
+Register it in `eval.go` inside `EvalPlan()` by appending to the `scorers` slice.
 
-Tests use Node's built-in test runner. Structural scorers have unit tests:
+## Config File
 
-```bash
-npm test
+multiplan supports `.multiplan.yml` in the current directory or `$HOME/.config/multiplan/config.yml`:
+
+```yaml
+models: [claude, gemini, codex, glm5]
+debate_model: claude
+converge_model: claude
+timeout_ms: 120000
+output_dir: ~/.multiplan/runs
+requirements: ""
+constraints: ""
 ```
 
-Current test coverage:
-- Coverage scorer (required sections)
-- Specificity scorer (concrete vs vague ratio)
-- Actionable scorer (numbered items, code blocks)
-
-## Submitting Changes
-
-1. Create a feature branch: `git checkout -b feature/my-feature`
-2. Commit with clear messages: `git commit -m "feat: add new model adapter"`
-3. Push and create a PR
-4. Ensure `npm run build` and `npm test` pass
+CLI flags always override config file values.
 
 ## Release Process
 
-1. Update version in `package.json`
-2. Create changelog entry
-3. Tag release: `git tag v0.x.0`
-4. Push tags: `git push origin --tags`
-5. Publish to npm: `npm publish`
+1. Update `Version` in `cmd/root.go`:
+   ```go
+   Version: "0.4.0",
+   ```
 
-## Questions?
+2. Update `CHANGELOG.md` with a new version section.
 
-Open an issue or discussion on GitHub. All contributions welcome!
+3. Update `homebrew/multiplan.rb` with the new version and SHA256 (available after tagging).
+
+4. Commit, tag, and push:
+   ```bash
+   git add -A
+   git commit -m "Release v0.4.0"
+   git tag v0.4.0
+   git push origin main --tags
+   ```
+
+5. The GitHub Actions CI will verify the build. After the tag is pushed, update the Homebrew formula SHA256 with the tarball hash from the release.

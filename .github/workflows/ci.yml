@@ -13,12 +13,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-go@v5
         with:
-          node-version: '20'
+          go-version: '1.22'
 
-      - run: npm ci
+      - name: Vet
+        run: go vet ./...
 
-      - run: npm run build
+      - name: Test
+        run: go test ./...
 
-      - run: npm test
+      - name: Build
+        run: go build -o multiplan .
+
+      - name: Eval fixtures (no API keys)
+        run: ./multiplan eval eval/fixtures/rate-limiter.json --fixture eval/fixtures/rate-limiter.json --no-judge

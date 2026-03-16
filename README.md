@@ -1,3 +1,7 @@
+![Go Version](https://img.shields.io/badge/go-1.22+-blue)
+[![CI](https://github.com/cyperx84/multiplan/actions/workflows/ci.yml/badge.svg)](https://github.com/cyperx84/multiplan/actions/workflows/ci.yml)
+![License](https://img.shields.io/badge/license-MIT-green)
+
 # multiplan
 
 **4-model parallel planning workflow with eval framework.**
@@ -10,10 +14,16 @@ Kill model selection anxiety. Get plans that have been stress-tested before a si
 
 ## Install
 
-### Go install
+### Go install (v0.3.0)
 
 ```bash
 go install github.com/cyperx84/multiplan@latest
+```
+
+### Homebrew
+
+```bash
+brew install cyperx84/tap/multiplan
 ```
 
 ### Download binary
@@ -47,7 +57,7 @@ multiplan eval ~/.multiplan/runs/LATEST/final-plan.md
 
 ---
 
-## How it works (v0.2.0 — lens-based prompts + eval scores)
+## How it works
 
 **Phase 1 — Independent planning (parallel, lens-based)**
 
@@ -62,14 +72,9 @@ All four models receive the same task spec, but with **different lenses**:
 
 Each produces a complete plan with no cross-contamination. They run concurrently — total time ≈ slowest model.
 
-**Phase 1.5 — Eval scores (NEW in v0.2.0)**
+**Phase 1.5 — Eval scores**
 
-Each plan is scored on:
-- **Coverage** — Required sections present
-- **Specificity** — Concrete tech/numbers vs vague language
-- **Actionable** — Numbered steps, code blocks
-
-Scores (0-10) are injected into the convergence phase so the final plan can **weight higher-scoring plans more heavily**.
+Each plan is scored on Coverage, Specificity, and Actionability. Scores are injected into the convergence phase.
 
 **Phase 2 — Cross-examination**
 
@@ -77,7 +82,7 @@ One model (default: Claude) reviews all four plans: what each gets right, what e
 
 **Phase 3 — Convergence (weighted by eval scores)**
 
-Final synthesis: best ideas from all four, **prioritising higher-scoring plans**, disagreements resolved, gaps filled. One actionable, validated plan.
+Final synthesis: best ideas from all four, prioritising higher-scoring plans. One actionable, validated plan.
 
 Output directory: `~/.multiplan/runs/<timestamp>/`
 
@@ -100,7 +105,7 @@ multiplan plan <task> [options]
 multiplan eval <file-or-dir> [options]
 ```
 
-### Options
+### Global flags
 
 | Flag | Description |
 |------|-------------|
@@ -112,23 +117,27 @@ multiplan eval <file-or-dir> [options]
 | `--converge-model` | Model for convergence phase |
 | `--timeout <ms>` | Per-model timeout (default: 120000) |
 | `--verbose` | Extra logging |
+| `--quiet` | Suppress all progress output (errors + final result only) |
 
-### Eval options
+### Plan flags
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Output structured JSON result |
+
+### Eval flags
 
 ```bash
 # Eval a single plan file
 multiplan eval ~/.multiplan/runs/LATEST/final-plan.md
 
-# Eval all plans in a run directory
-multiplan eval ~/.multiplan/runs/LATEST/
-
-# Use a fixture (expected topics + min score threshold)
+# Use a fixture
 multiplan eval ~/.multiplan/runs/LATEST/ --fixture eval/fixtures/rate-limiter.json
 
-# Choose LLM judge model
+# Choose LLM judge model (claude, gemini, codex, glm5)
 multiplan eval final-plan.md --judge gemini
 
-# Skip LLM judge (fast, structural only)
+# Skip LLM judge
 multiplan eval final-plan.md --no-judge
 
 # JSON output
@@ -137,25 +146,99 @@ multiplan eval final-plan.md --json
 
 ---
 
-## Eval framework
+## Config file
 
-The eval system scores plans on two axes:
+multiplan loads from `.multiplan.yml` in the current directory, or `$HOME/.config/multiplan/config.yml`.
+
+```yaml
+models: [claude, gemini, codex, glm5]
+debate_model: claude
+converge_model: claude
+timeout_ms: 120000
+output_dir: ~/.multiplan/runs
+requirements: ""
+constraints: ""
+```
+
+CLI flags always override config file values. The config file is optional — defaults work without it.
+
+---
+
+## JSON output
+
+Add `--json` to the `plan` command for machine-readable output:
+
+```bash
+multiplan plan "Design a caching layer" --json
+```
+
+Output:
+
+```json
+{
+  "run_id": "20260316T120000-123456",
+  "output_dir": "/home/user/.multiplan/runs/...",
+  "models": [
+    {
+      "model_id": "claude",
+      "model_name": "Claude (Opus)",
+      "plan_excerpt": "...",
+      "duration_ms": 4200
+    }
+  ],
+  "debate_excerpt": "...",
+  "final_plan": "# Multimodel Plan: ..."
+}
+```
+
+---
+
+## Quiet mode
+
+Suppress all progress output — useful in scripts:
+
+```bash
+multiplan plan "Design a cache layer" --quiet --json > result.json
+```
+
+---
+
+## Token & cost tracking
+
+After each run, multiplan prints a cost estimate:
+
+```
+📊 Token usage: 45,230 input / 12,450 output (~$0.85 estimated)
+```
+
+Pricing used (rough estimates):
+
+| Model | Input / 1M | Output / 1M |
+|-------|-----------|------------|
+| Claude Opus | $15 | $75 |
+| Gemini Pro | $1.25 | $5 |
+| GPT-4o | $2.50 | $10 |
+| GLM-5 | $1 | $2 |
+
+---
+
+## Eval framework
 
 ### Structural scorers (fast, no model calls)
 
 | Scorer | What it measures |
 |--------|-----------------|
-| **Coverage** | Required sections present (Overview, Architecture, Implementation, Trade-offs) |
-| **Specificity** | Ratio of concrete terms (tech names, numbers, commands) vs vague language ("might", "could", "perhaps") |
-| **Actionable** | Numbered steps, code blocks, concrete commands |
+| **Coverage** | Required sections present |
+| **Specificity** | Concrete tech/numbers vs vague language |
+| **Actionable** | Numbered steps, code blocks, commands |
 
-### LLM Judge (calls a model)
+### LLM Judge
 
-Grades the plan 0-10 on: completeness, concreteness, risk awareness, implementability. Returns `overall` as the judge score.
+```bash
+multiplan eval final-plan.md --judge claude   # or gemini, codex, glm5
+```
 
 ### Fixtures
-
-Pre-built eval cases in `eval/fixtures/*.json`:
 
 ```json
 {
@@ -173,21 +256,12 @@ Pre-built eval cases in `eval/fixtures/*.json`:
 
 | Model | Auth |
 |-------|------|
-| **Claude** | `ANTHROPIC_API_KEY` environment variable |
-| **Gemini** | `GOOGLE_AI_API_KEY` or `GEMINI_API_KEY` environment variable |
-| **Codex** | `OPENAI_API_KEY` environment variable |
-| **GLM-5** | `ZAI_API_KEY` env var, or reads from `~/.openclaw/agents/main/agent/auth-profiles.json` (OpenClaw) |
+| **Claude** | `ANTHROPIC_API_KEY` |
+| **Gemini** | `GOOGLE_AI_API_KEY` or `GEMINI_API_KEY` |
+| **Codex** | `OPENAI_API_KEY` |
+| **GLM-5** | `ZAI_API_KEY` env var, or `~/.openclaw/agents/main/agent/auth-profiles.json` |
 
-Models are auto-discovered at runtime. If a model is missing or fails, it's marked unavailable and skipped — planning continues with the remaining models.
-
----
-
-## What's new in v0.2.0
-
-1. **Lens-based prompts** — Each model gets a different planning angle (correctness, scale, speed, critique)
-2. **Eval → convergence** — Plans are scored before convergence, and scores are injected into the final synthesis prompt
-3. **Streaming progress** — See which models finish first (goroutines + channels)
-4. **Single binary** — No runtime dependencies, just Go
+Models are auto-discovered at runtime. Missing/failed models are skipped.
 
 ---
 
@@ -196,8 +270,11 @@ Models are auto-discovered at runtime. If a model is missing or fails, it's mark
 ```bash
 go build -o multiplan .   # Build
 go test ./...             # Run tests
+go vet ./...              # Lint
 ./multiplan --help        # Verify CLI
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ---
 

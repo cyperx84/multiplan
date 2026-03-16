@@ -23,9 +23,14 @@ func (g *GLMProvider) Available(ctx context.Context) bool {
 }
 
 func (g *GLMProvider) Plan(ctx context.Context, prompt string, timeout time.Duration) (string, error) {
+	text, _, _, err := g.PlanWithTokens(ctx, prompt, timeout)
+	return text, err
+}
+
+func (g *GLMProvider) PlanWithTokens(ctx context.Context, prompt string, timeout time.Duration) (string, int, int, error) {
 	apiKey, err := g.getAPIKey()
 	if err != nil {
-		return "", err
+		return "", 0, 0, err
 	}
 
 	payload := map[string]interface{}{
@@ -39,7 +44,7 @@ func (g *GLMProvider) Plan(ctx context.Context, prompt string, timeout time.Dura
 
 	data, err := json.Marshal(payload)
 	if err != nil {
-		return "", err
+		return "", 0, 0, err
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -47,7 +52,7 @@ func (g *GLMProvider) Plan(ctx context.Context, prompt string, timeout time.Dura
 
 	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.z.ai/api/coding/paas/v4/chat/completions", bytes.NewReader(data))
 	if err != nil {
-		return "", err
+		return "", 0, 0, err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -56,13 +61,13 @@ func (g *GLMProvider) Plan(ctx context.Context, prompt string, timeout time.Dura
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", 0, 0, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("GLM-5 API error: %s - %s", resp.Status, string(body))
+		return "", 0, 0, fmt.Errorf("GLM-5 API error: %s - %s", resp.Status, string(body))
 	}
 
 	var result struct {
@@ -71,21 +76,24 @@ func (g *GLMProvider) Plan(ctx context.Context, prompt string, timeout time.Dura
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+		} `json:"usage"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", err
+		return "", 0, 0, err
 	}
 
 	if len(result.Choices) == 0 {
-		return "", fmt.Errorf("no content in response")
+		return "", 0, 0, fmt.Errorf("no content in response")
 	}
 
-	return result.Choices[0].Message.Content, nil
+	return result.Choices[0].Message.Content, result.Usage.PromptTokens, result.Usage.CompletionTokens, nil
 }
 
 func (g *GLMProvider) getAPIKey() (string, error) {
-	// 1. Environment variable
 	if key := os.Getenv("ZAI_API_KEY"); key != "" {
 		return key, nil
 	}
@@ -93,7 +101,6 @@ func (g *GLMProvider) getAPIKey() (string, error) {
 		return key, nil
 	}
 
-	// 2. OpenClaw auth-profiles.json
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("could not get home directory")

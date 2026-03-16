@@ -13,17 +13,19 @@ import (
 	"github.com/cyperx84/multiplan/internal/models"
 )
 
+// RunResult is returned by Run.
 type RunResult struct {
-	RunID      string
-	OutputDir  string
-	Plans      []models.ModelResult
-	Debate     string
-	FinalPlan  string
+	RunID     string
+	OutputDir string
+	Plans     []models.ModelResult
+	Debate    string
+	FinalPlan string
 }
 
+// Run executes the full 3-phase multiplan pipeline.
 func Run(cfg *config.Config) (*RunResult, error) {
 	ctx := context.Background()
-	
+
 	runID := generateRunID()
 	requirements := cfg.GetRequirements()
 	constraints := cfg.GetConstraints()
@@ -43,15 +45,23 @@ func Run(cfg *config.Config) (*RunResult, error) {
 		return nil, err
 	}
 
-	if cfg.Verbose {
-		fmt.Printf("[multiplan] Run ID: %s\n", runID)
-		fmt.Printf("[multiplan] Output: %s\n", outputDir)
+	log := func(format string, args ...interface{}) {
+		if !cfg.Quiet && cfg.Verbose {
+			fmt.Printf(format+"\n", args...)
+		}
 	}
 
-	// Phase 1: Parallel planning with lens-based prompts
-	if cfg.Verbose {
-		fmt.Println("[multiplan] Phase 1 — Running models in parallel with lens-based prompts...")
+	logf := func(format string, args ...interface{}) {
+		if !cfg.Quiet {
+			fmt.Printf(format, args...)
+		}
 	}
+
+	log("[multiplan] Run ID: %s", runID)
+	log("[multiplan] Output: %s", outputDir)
+
+	// ── Phase 1: Parallel planning ───────────────────────────────────────────
+	log("[multiplan] Phase 1 — Running models in parallel with lens-based prompts...")
 
 	modelIDs := cfg.Models
 	if len(modelIDs) == 0 {
@@ -75,32 +85,36 @@ func Run(cfg *config.Config) (*RunResult, error) {
 			}
 
 			startTime := time.Now()
-
-			// Get lens-based prompt for this model
 			prompt := GetLensPrompt(id, cfg.Task, requirements, constraints)
-
 			timeout := time.Duration(timeoutMs) * time.Millisecond
-			plan, err := provider.Plan(ctx, prompt, timeout)
+
+			var plan string
+			var inputTok, outputTok int
+			var runErr error
+
+			if pt, ok := provider.(models.ProviderWithTokens); ok {
+				plan, inputTok, outputTok, runErr = pt.PlanWithTokens(ctx, prompt, timeout)
+			} else {
+				plan, runErr = provider.Plan(ctx, prompt, timeout)
+			}
+
 			durationMs := time.Since(startTime).Milliseconds()
 
 			result := models.ModelResult{
-				ModelID:    id,
-				ModelName:  provider.Name(),
-				DurationMs: durationMs,
+				ModelID:      id,
+				ModelName:    provider.Name(),
+				DurationMs:   durationMs,
+				InputTokens:  inputTok,
+				OutputTokens: outputTok,
 			}
 
-			if err != nil {
-				result.Error = err.Error()
-				result.Plan = fmt.Sprintf("[Error: %s]", err.Error())
+			if runErr != nil {
+				result.Error = runErr.Error()
+				result.Plan = fmt.Sprintf("[Error: %s]", runErr.Error())
 			} else {
 				result.Plan = plan
-				// Write plan to disk
 				filename := filepath.Join(outputDir, fmt.Sprintf("plan-%s.md", id))
-				if err := os.WriteFile(filename, []byte(plan), 0644); err == nil {
-					if cfg.Verbose {
-						fmt.Printf("[multiplan]   ✓ %s done (%dms)\n", provider.Name(), durationMs)
-					}
-				}
+				_ = os.WriteFile(filename, []byte(plan), 0644)
 			}
 
 			mu.Lock()
@@ -111,57 +125,54 @@ func Run(cfg *config.Config) (*RunResult, error) {
 		}(modelID)
 	}
 
-	// Wait for all models to complete
+	// Close channel when all goroutines finish.
 	go func() {
 		wg.Wait()
 		close(resultChan)
 	}()
 
-	// Stream progress as models finish
-	if cfg.Verbose {
-		for range resultChan {
-			// Results already printed in goroutine
+	// Stream progress as each model finishes.
+	for r := range resultChan {
+		if cfg.Verbose {
+			// Already printed inside goroutine in verbose mode; add summary line.
+			if r.Error == "" {
+				log("[multiplan]   ✓ %s done (%dms)", r.ModelName, r.DurationMs)
+			} else {
+				log("[multiplan]   ✗ %s failed: %s", r.ModelName, r.Error)
+			}
+		} else {
+			// Default: simple progress line (suppressed only if --quiet).
+			durationSec := float64(r.DurationMs) / 1000.0
+			if r.Error == "" {
+				logf("⏳ %s... done (%.1fs)\n", r.ModelName, durationSec)
+			} else {
+				logf("⏳ %s... failed\n", r.ModelName)
+			}
 		}
-	} else {
-		for range resultChan {
-			// Drain channel
-		}
 	}
 
-	if cfg.Verbose {
-		fmt.Println("[multiplan] Phase 1 complete")
-	}
+	log("[multiplan] Phase 1 complete")
 
-	// Phase 1.5: Eval all plans (NEW for v0.2.0)
-	if cfg.Verbose {
-		fmt.Println("[multiplan] Phase 1.5 — Evaluating plans...")
-	}
+	// ── Phase 1.5: Structural eval ───────────────────────────────────────────
+	log("[multiplan] Phase 1.5 — Evaluating plans...")
 
-	evalCase := &eval.EvalCase{
-		Task: cfg.Task,
-	}
-
+	evalCase := &eval.EvalCase{Task: cfg.Task}
 	planScores := make(map[string]float64)
 	planTexts := make(map[string]string)
 
 	for _, result := range results {
 		if result.Error == "" {
-			// Eval this plan (structural only, no LLM judge for speed)
 			report, err := eval.EvalPlan(result.Plan, evalCase, &eval.EvalOptions{Judge: ""})
 			if err == nil {
 				planScores[result.ModelID] = report.OverallScore
 				planTexts[result.ModelID] = result.Plan
-				if cfg.Verbose {
-					fmt.Printf("[multiplan]   %s: %.1f/10\n", result.ModelName, report.OverallScore*10)
-				}
+				log("[multiplan]   %s: %.1f/10", result.ModelName, report.OverallScore*10)
 			}
 		}
 	}
 
-	// Phase 2: Cross-examination (debate)
-	if cfg.Verbose {
-		fmt.Println("[multiplan] Phase 2 — Cross-examination...")
-	}
+	// ── Phase 2: Debate ──────────────────────────────────────────────────────
+	log("[multiplan] Phase 2 — Cross-examination...")
 
 	debateProvider, ok := models.GetProvider(cfg.DebateModel)
 	if !ok {
@@ -174,23 +185,17 @@ func Run(cfg *config.Config) (*RunResult, error) {
 	debate, err := debateProvider.Plan(ctx, debatePrompt, timeout)
 	if err != nil {
 		debate = fmt.Sprintf("[Debate failed: %s]", err.Error())
-		if cfg.Verbose {
-			fmt.Printf("[multiplan]   ✗ Debate failed: %s\n", err.Error())
-		}
+		log("[multiplan]   ✗ Debate failed: %s", err.Error())
 	} else {
-		if cfg.Verbose {
-			fmt.Printf("[multiplan]   ✓ Debate complete (via %s)\n", debateProvider.Name())
-		}
+		log("[multiplan]   ✓ Debate complete (via %s)", debateProvider.Name())
 	}
 
 	if err := os.WriteFile(filepath.Join(outputDir, "debate.md"), []byte(debate), 0644); err != nil {
 		return nil, err
 	}
 
-	// Phase 3: Convergence with eval scores
-	if cfg.Verbose {
-		fmt.Println("[multiplan] Phase 3 — Convergence with eval scores...")
-	}
+	// ── Phase 3: Convergence ─────────────────────────────────────────────────
+	log("[multiplan] Phase 3 — Convergence with eval scores...")
 
 	convergeProvider, ok := models.GetProvider(cfg.ConvergeModel)
 	if !ok {
@@ -198,43 +203,48 @@ func Run(cfg *config.Config) (*RunResult, error) {
 	}
 
 	convergePrompt := GetConvergePrompt(cfg.Task, planTexts, debate, planScores)
-
 	finalPlan, err := convergeProvider.Plan(ctx, convergePrompt, timeout)
 	if err != nil {
 		finalPlan = fmt.Sprintf("[Convergence failed: %s]", err.Error())
-		if cfg.Verbose {
-			fmt.Printf("[multiplan]   ✗ Convergence failed: %s\n", err.Error())
-		}
+		log("[multiplan]   ✗ Convergence failed: %s", err.Error())
 	} else {
-		if cfg.Verbose {
-			fmt.Printf("[multiplan]   ✓ Convergence complete (via %s)\n", convergeProvider.Name())
-		}
+		log("[multiplan]   ✓ Convergence complete (via %s)", convergeProvider.Name())
 	}
 
-	// Add metadata header
-	header := fmt.Sprintf("# Multimodel Plan: %s\n\n> Generated: %s\n> Models: ", cfg.Task, time.Now().Format(time.RFC3339))
-	modelNames := []string{}
+	// Build header and full plan.
+	modelNames := make([]string, 0, len(results))
 	for _, r := range results {
 		modelNames = append(modelNames, r.ModelName)
 	}
-	header += fmt.Sprintf("%v\n\n---\n\n", modelNames)
-
+	header := fmt.Sprintf("# Multimodel Plan: %s\n\n> Generated: %s\n> Models: %v\n\n---\n\n",
+		cfg.Task, time.Now().Format(time.RFC3339), modelNames)
 	fullPlan := header + finalPlan
 
 	if err := os.WriteFile(filepath.Join(outputDir, "final-plan.md"), []byte(fullPlan), 0644); err != nil {
 		return nil, err
 	}
 
-	if cfg.Verbose {
-		fmt.Println("[multiplan] Phase 3 complete")
+	log("[multiplan] Phase 3 complete")
+
+	// ── Token cost summary ───────────────────────────────────────────────────
+	var totalIn, totalOut int
+	var totalCost float64
+	for _, r := range results {
+		totalIn += r.InputTokens
+		totalOut += r.OutputTokens
+		totalCost += models.EstimateCost(r.ModelID, r.InputTokens, r.OutputTokens)
+	}
+	if totalIn+totalOut > 0 && !cfg.Quiet {
+		logf("📊 Token usage: %s input / %s output (~$%.2f estimated)\n",
+			formatInt(totalIn), formatInt(totalOut), totalCost)
 	}
 
 	return &RunResult{
-		RunID:      runID,
-		OutputDir:  outputDir,
-		Plans:      results,
-		Debate:     debate,
-		FinalPlan:  fullPlan,
+		RunID:     runID,
+		OutputDir: outputDir,
+		Plans:     results,
+		Debate:    debate,
+		FinalPlan: fullPlan,
 	}, nil
 }
 
@@ -242,4 +252,18 @@ func generateRunID() string {
 	now := time.Now()
 	timestamp := now.Format("20060102T150405")
 	return fmt.Sprintf("%s-%06d", timestamp, now.Nanosecond()/1000)
+}
+
+// formatInt formats an integer with comma separators.
+func formatInt(n int) string {
+	s := fmt.Sprintf("%d", n)
+	// Insert commas every 3 digits from right.
+	result := []byte{}
+	for i, c := range []byte(s) {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			result = append(result, ',')
+		}
+		result = append(result, c)
+	}
+	return string(result)
 }
