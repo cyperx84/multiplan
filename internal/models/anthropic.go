@@ -1,19 +1,34 @@
 package models
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
+	"strings"
 	"time"
 )
 
-type ClaudeProvider struct{}
+type ClaudeProvider struct {
+	// ClaudeCmd overrides the CLI binary path (default: "claude").
+	ClaudeCmd string
+	// ClaudeModel overrides the model for CLI mode (e.g. "claude-opus-4-20250514").
+	ClaudeModel string
+}
 
 func (c *ClaudeProvider) ID() string   { return "claude" }
 func (c *ClaudeProvider) Name() string { return "Claude (Opus)" }
 
 func (c *ClaudeProvider) Available(ctx context.Context) bool {
-	return os.Getenv("ANTHROPIC_API_KEY") != ""
+	// Mode A: API key
+	if os.Getenv("ANTHROPIC_API_KEY") != "" {
+		return true
+	}
+	// Mode B: CLI binary on PATH
+	cmd := c.cliCmd()
+	_, err := exec.LookPath(cmd)
+	return err == nil
 }
 
 func (c *ClaudeProvider) Plan(ctx context.Context, prompt string, timeout time.Duration) (string, error) {
@@ -23,10 +38,14 @@ func (c *ClaudeProvider) Plan(ctx context.Context, prompt string, timeout time.D
 
 func (c *ClaudeProvider) PlanWithTokens(ctx context.Context, prompt string, timeout time.Duration) (string, int, int, error) {
 	apiKey := os.Getenv("ANTHROPIC_API_KEY")
-	if apiKey == "" {
-		return "", 0, 0, fmt.Errorf("Claude requires ANTHROPIC_API_KEY. Set it with: export ANTHROPIC_API_KEY=sk-...")
+	if apiKey != "" {
+		return c.planViaAPI(ctx, apiKey, prompt, timeout)
 	}
+	return c.planViaCLI(ctx, prompt, timeout)
+}
 
+// planViaAPI uses the Anthropic HTTP API (Mode A).
+func (c *ClaudeProvider) planViaAPI(ctx context.Context, apiKey, prompt string, timeout time.Duration) (string, int, int, error) {
 	client := &APIClient{
 		BaseURL:      "https://api.anthropic.com",
 		APIKey:       apiKey,
@@ -67,4 +86,49 @@ func (c *ClaudeProvider) PlanWithTokens(ctx context.Context, prompt string, time
 	}
 
 	return result.Content[0].Text, result.Usage.InputTokens, result.Usage.OutputTokens, nil
+}
+
+// planViaCLI uses `claude -p` subprocess (Mode B).
+func (c *ClaudeProvider) planViaCLI(ctx context.Context, prompt string, timeout time.Duration) (string, int, int, error) {
+	cmd := c.cliCmd()
+	if _, err := exec.LookPath(cmd); err != nil {
+		return "", 0, 0, fmt.Errorf("Claude requires ANTHROPIC_API_KEY or the claude CLI on PATH")
+	}
+
+	args := []string{"-p", prompt}
+	if c.ClaudeModel != "" {
+		args = append(args, "--model", c.ClaudeModel)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	command := exec.CommandContext(ctx, cmd, args...)
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+
+	if err := command.Run(); err != nil {
+		errMsg := strings.TrimSpace(stderr.String())
+		if errMsg == "" {
+			errMsg = err.Error()
+		}
+		return "", 0, 0, fmt.Errorf("claude CLI failed: %s", errMsg)
+	}
+
+	text := strings.TrimSpace(stdout.String())
+	if text == "" {
+		return "", 0, 0, fmt.Errorf("claude CLI returned empty output")
+	}
+
+	// CLI does not expose token usage
+	return text, 0, 0, nil
+}
+
+// cliCmd returns the CLI binary name/path.
+func (c *ClaudeProvider) cliCmd() string {
+	if c.ClaudeCmd != "" {
+		return c.ClaudeCmd
+	}
+	return "claude"
 }

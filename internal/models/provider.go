@@ -26,6 +26,7 @@ type ModelResult struct {
 	Plan         string
 	DurationMs   int64
 	Error        string
+	Skipped      bool
 	InputTokens  int
 	OutputTokens int
 }

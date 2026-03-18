@@ -45,4 +45,6 @@ func init() {
 	rootCmd.PersistentFlags().Bool("quiet", false, "Suppress all progress output (errors and final result only)")
 	rootCmd.PersistentFlags().Bool("skip-lattice", false, "Skip lattice mental model framing (Phase 0)")
 	rootCmd.PersistentFlags().String("lattice-cmd", "lattice", "Lattice binary command")
+	rootCmd.PersistentFlags().String("claude-model", "", "Model override for Claude CLI mode (e.g. claude-opus-4-20250514)")
+	rootCmd.PersistentFlags().String("claude-cmd", "", "Claude CLI binary path (default: claude)")
 }

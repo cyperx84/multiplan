@@ -28,6 +28,8 @@ type Config struct {
 	JSON          bool
 	SkipLattice   bool
 	LatticeCmd    string
+	ClaudeCmd     string
+	ClaudeModel   string
 	// ProviderFactory is optional. If set, the planner calls it to get providers
 	// instead of the global registry. Used in tests to inject mock providers.
 	ProviderFactory func(id string) (Provider, bool)

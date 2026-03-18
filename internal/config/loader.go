@@ -17,6 +17,8 @@ type FileConfig struct {
 	OutputDir     string   `yaml:"output_dir"`
 	Requirements  string   `yaml:"requirements"`
 	Constraints   string   `yaml:"constraints"`
+	ClaudeCmd     string   `yaml:"claude_cmd"`
+	ClaudeModel   string   `yaml:"claude_model"`
 }
 
 // LoadFileConfig tries to load .multiplan.yml from:
@@ -85,5 +87,11 @@ func ApplyFileConfig(cfg *Config, fc *FileConfig) {
 	}
 	if cfg.Constraints == "" && fc.Constraints != "" {
 		cfg.Constraints = fc.Constraints
+	}
+	if cfg.ClaudeCmd == "" && fc.ClaudeCmd != "" {
+		cfg.ClaudeCmd = fc.ClaudeCmd
+	}
+	if cfg.ClaudeModel == "" && fc.ClaudeModel != "" {
+		cfg.ClaudeModel = fc.ClaudeModel
 	}
 }

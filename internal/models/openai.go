@@ -24,7 +24,7 @@ func (c *CodexProvider) Plan(ctx context.Context, prompt string, timeout time.Du
 func (c *CodexProvider) PlanWithTokens(ctx context.Context, prompt string, timeout time.Duration) (string, int, int, error) {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
-		return "", 0, 0, fmt.Errorf("Codex/GPT requires OPENAI_API_KEY. Set it with: export OPENAI_API_KEY=sk-...")
+		return "", 0, 0, fmt.Errorf("OpenAI requires OPENAI_API_KEY (skipped — set key to enable)")
 	}
 
 	client := &APIClient{

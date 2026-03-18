@@ -113,6 +113,20 @@ func Run(cfg *config.Config) (*RunResult, error) {
 	// ── Phase 1: Parallel planning ───────────────────────────────────────────
 	log("[multiplan] Phase 1 — Running models in parallel with lens-based prompts...")
 
+	// Wire claude_cmd / claude_model config into the provider
+	if cfg.ProviderFactory == nil {
+		if p, ok := models.GetProvider("claude"); ok {
+			if cp, ok := p.(*models.ClaudeProvider); ok {
+				if cfg.ClaudeCmd != "" {
+					cp.ClaudeCmd = cfg.ClaudeCmd
+				}
+				if cfg.ClaudeModel != "" {
+					cp.ClaudeModel = cfg.ClaudeModel
+				}
+			}
+		}
+	}
+
 	modelIDs := cfg.Models
 	if len(modelIDs) == 0 {
 		modelIDs = models.GetAvailableModels(ctx)
@@ -131,6 +145,21 @@ func Run(cfg *config.Config) (*RunResult, error) {
 
 			provider, ok := getProvider(cfg, id)
 			if !ok {
+				return
+			}
+
+			// Check availability — mark as skipped if unavailable
+			if !provider.Available(ctx) {
+				result := models.ModelResult{
+					ModelID:   id,
+					ModelName: provider.Name(),
+					Skipped:   true,
+					Error:     "unavailable",
+				}
+				mu.Lock()
+				results = append(results, result)
+				mu.Unlock()
+				resultChan <- result
 				return
 			}
 
@@ -189,7 +218,13 @@ func Run(cfg *config.Config) (*RunResult, error) {
 
 	// Stream progress as each model finishes.
 	for r := range resultChan {
-		if cfg.Verbose {
+		if r.Skipped {
+			if cfg.Verbose {
+				log("[multiplan]   ⊘ %s skipped (unavailable)", r.ModelName)
+			} else {
+				logf("⏳ %s... skipped\n", r.ModelName)
+			}
+		} else if cfg.Verbose {
 			if r.Error == "" {
 				log("[multiplan]   ✓ %s done (%dms)", r.ModelName, r.DurationMs)
 			} else {
@@ -357,7 +392,9 @@ func printRunSummary(result *RunResult, elapsed time.Duration, quiet, jsonMode b
 	hasScores := len(result.EvalScores) > 0
 
 	for _, p := range result.Plans {
-		if p.Error != "" {
+		if p.Skipped {
+			fmt.Printf("  %-10s SKIPPED (unavailable)\n", p.ModelID)
+		} else if p.Error != "" {
 			// Determine failure reason
 			reason := p.Error
 			if strings.Contains(strings.ToLower(reason), "timeout") || strings.Contains(strings.ToLower(reason), "deadline") {
@@ -421,9 +458,11 @@ func runLatticeFraming(latticeCmd, task, outputDir string, verbose bool) []strin
 		slugs = slugs[:5]
 	}
 
-	// Step 2: Think with the discovered models
+	// Step 2: Think with the discovered models (15s timeout — it calls an LLM)
 	modelsArg := strings.Join(slugs, ",")
-	cmd := exec.Command(latticeCmd, "think", task, "--models", modelsArg, "--json")
+	thinkCtx, thinkCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer thinkCancel()
+	cmd := exec.CommandContext(thinkCtx, latticeCmd, "think", task, "--models", modelsArg, "--json")
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
