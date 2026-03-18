@@ -95,15 +95,24 @@ func (c *ClaudeProvider) planViaCLI(ctx context.Context, prompt string, timeout 
 		return "", 0, 0, fmt.Errorf("Claude requires ANTHROPIC_API_KEY or the claude CLI on PATH")
 	}
 
-	args := []string{"-p", prompt}
+	// CLI mode is slower than direct API — give it 2x the configured timeout.
+	cliTimeout := timeout * 2
+	if cliTimeout < 10*time.Minute {
+		cliTimeout = 10 * time.Minute
+	}
+
+	// Pass prompt via stdin to avoid shell escaping issues and ARG_MAX limits.
+	// `claude -p` reads from stdin when no inline prompt is given.
+	args := []string{"-p"}
 	if c.ClaudeModel != "" {
 		args = append(args, "--model", c.ClaudeModel)
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	ctx, cancel := context.WithTimeout(ctx, cliTimeout)
 	defer cancel()
 
 	command := exec.CommandContext(ctx, cmd, args...)
+	command.Stdin = strings.NewReader(prompt)
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
 	command.Stderr = &stderr
