@@ -342,8 +342,38 @@ type latticeThinkResult struct {
 	Summary string `json:"summary"`
 }
 
+// latticeSearchResult is a single model object returned by `lattice search --json`.
+type latticeSearchResult struct {
+	Slug     string `json:"slug"`
+	Name     string `json:"name"`
+	Category string `json:"category"`
+}
+
 func runLatticeFraming(latticeCmd, task, outputDir string, verbose bool) []string {
-	cmd := exec.Command(latticeCmd, "think", task, "--json")
+	// Step 1: Search for relevant models
+	slugs := latticeSearch(latticeCmd, task, verbose)
+	if len(slugs) == 0 {
+		// Fallback: search for generic planning models
+		if verbose {
+			fmt.Printf("[multiplan]   ↻ No models for task, trying fallback search...\n")
+		}
+		slugs = latticeSearch(latticeCmd, "planning", verbose)
+	}
+	if len(slugs) == 0 {
+		if verbose {
+			fmt.Printf("[multiplan]   ✗ Lattice search returned no models\n")
+		}
+		return nil
+	}
+
+	// Cap at 5 slugs
+	if len(slugs) > 5 {
+		slugs = slugs[:5]
+	}
+
+	// Step 2: Think with the discovered models
+	modelsArg := strings.Join(slugs, ",")
+	cmd := exec.Command(latticeCmd, "think", task, "--models", modelsArg, "--json")
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -351,7 +381,7 @@ func runLatticeFraming(latticeCmd, task, outputDir string, verbose bool) []strin
 
 	if err := cmd.Run(); err != nil {
 		if verbose {
-			fmt.Printf("[multiplan]   ✗ Lattice failed: %s\n", err)
+			fmt.Printf("[multiplan]   ✗ Lattice think failed: %s\n", err)
 		}
 		return nil
 	}
@@ -385,4 +415,36 @@ func runLatticeFraming(latticeCmd, task, outputDir string, verbose bool) []strin
 	}
 
 	return modelNames
+}
+
+// latticeSearch runs `lattice search <query> --json` and returns slugs.
+func latticeSearch(latticeCmd, query string, verbose bool) []string {
+	cmd := exec.Command(latticeCmd, "search", query, "--json")
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		if verbose {
+			fmt.Printf("[multiplan]   ✗ Lattice search failed: %s\n", err)
+		}
+		return nil
+	}
+
+	var results []latticeSearchResult
+	if err := json.Unmarshal(stdout.Bytes(), &results); err != nil {
+		if verbose {
+			fmt.Printf("[multiplan]   ✗ Lattice search JSON parse failed: %s\n", err)
+		}
+		return nil
+	}
+
+	var slugs []string
+	for _, r := range results {
+		if r.Slug != "" {
+			slugs = append(slugs, r.Slug)
+		}
+	}
+	return slugs
 }
