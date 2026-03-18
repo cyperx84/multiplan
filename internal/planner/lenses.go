@@ -81,9 +81,26 @@ func getLensForModel(modelID string) string {
 }
 
 func GetDebatePrompt(task string, plans map[string]string) string {
-	template := `# Cross-Examination Prompt
+	// Build plan sections dynamically from however many plans actually exist
+	planSections := []string{}
+	bestUniqueLines := []string{}
+	labels := planLabels(len(plans))
 
-You are a critical technical reviewer tasked with cross-examining four independent architectural plans.
+	i := 0
+	for modelID, plan := range plans {
+		label := labels[i]
+		section := fmt.Sprintf("## Plan %s (%s)\n\n%s", label, modelID, plan)
+		planSections = append(planSections, section)
+		bestUniqueLines = append(bestUniqueLines, fmt.Sprintf("- Plan %s (%s): [best idea only it has]", label, modelID))
+		i++
+	}
+
+	n := len(plans)
+	header := fmt.Sprintf("You are a critical technical reviewer tasked with cross-examining %d independent architectural plan(s).", n)
+
+	prompt := fmt.Sprintf(`# Cross-Examination Prompt
+
+%s
 
 ---
 
@@ -99,7 +116,7 @@ You are a critical technical reviewer tasked with cross-examining four independe
 
 ## Your Job
 
-Analyse all four plans critically. For each, identify:
+Analyse all plans critically. For each plan, identify:
 1. What it gets right
 2. What it misses or gets wrong
 3. What assumptions it makes that may not hold
@@ -109,52 +126,67 @@ Then identify:
 - Where the plans **disagree** (contested decisions — these need the most scrutiny)
 - The **single best idea** from each plan that the others missed
 
+## IMPORTANT
+
+Do NOT ask clarifying questions. Do NOT wait for more input. Execute the cross-examination now based on the plans provided above.
+
 ## Output Format
 
-` + "```" + `
+`+"```"+`
 ## Agreements
-[What all four plans converge on — these are safe bets]
+[What all plans converge on — these are safe bets]
 
 ## Disagreements
 [Where they diverge — include what each says and why it matters]
 
 ## Best Unique Ideas
-- Plan A: [best idea only it has]
-- Plan B: [best idea only it has]
-- Plan C: [best idea only it has]
-- Plan D: [best idea only it has]
+%s
 
 ## Critical Gaps
-[Important things ALL FOUR plans missed]
+[Important things ALL plans missed]
 
 ## Recommendation Summary
 [2-3 sentences on what the convergence plan should prioritise]
-` + "```" + `
-`
+`+"```",
+		header,
+		task,
+		strings.Join(planSections, "\n\n---\n\n"),
+		strings.Join(bestUniqueLines, "\n"),
+	)
+
+	return prompt
+}
+
+func GetConvergePrompt(task string, plans map[string]string, debate string, scores map[string]float64) string {
+	n := len(plans)
+	labels := planLabels(n)
+
+	// Build score summary
+	scoreLines := []string{}
+	i := 0
+	for modelID, score := range scores {
+		if i < len(labels) {
+			scoreLines = append(scoreLines, fmt.Sprintf("- Plan %s (%s): %.1f/10", labels[i], modelID, score*10))
+			i++
+		}
+	}
 
 	// Build plan sections
 	planSections := []string{}
-	labels := []string{"A", "B", "C", "D"}
-	modelNames := []string{"Claude / Opus", "Gemini", "Codex / GPT", "GLM-5 / ZhipuAI"}
-	
-	i := 0
-	for _, plan := range plans {
+	i = 0
+	for modelID, plan := range plans {
 		if i < len(labels) {
-			section := fmt.Sprintf("## Plan %s (%s)\n\n%s", labels[i], modelNames[i], plan)
+			section := fmt.Sprintf("## Plan %s (%s)\n\n%s", labels[i], modelID, plan)
 			planSections = append(planSections, section)
 			i++
 		}
 	}
 
-	return fmt.Sprintf(template, task, strings.Join(planSections, "\n\n---\n\n"))
-}
-
-func GetConvergePrompt(task string, plans map[string]string, debate string, scores map[string]float64) string {
-	template := `# Convergence Prompt
+	prompt := fmt.Sprintf(`# Convergence Prompt
 
 You are a senior architect producing a final, unified technical plan.
 
-You have four independent plans, eval scores for each, and a cross-examination analysis. Your job: synthesise the best ideas from all four into one definitive, actionable plan.
+You have %d independent plan(s), eval scores for each, and a cross-examination analysis. Your job: synthesise the best ideas into one definitive, actionable plan.
 
 ---
 
@@ -180,6 +212,10 @@ You have four independent plans, eval scores for each, and a cross-examination a
 
 ---
 
+## IMPORTANT
+
+Do NOT ask clarifying questions. Do NOT wait for more input. Produce the final converged plan NOW based on the plans and analysis above.
+
 ## Instructions
 
 - Take the **best ideas from each plan** as identified in the debate
@@ -190,7 +226,7 @@ You have four independent plans, eval scores for each, and a cross-examination a
 
 ## Output Format
 
-` + "```" + `
+`+"```"+`
 ## Final Architecture Decision
 [The definitive architectural approach — clear, no hedging]
 
@@ -208,32 +244,22 @@ You have four independent plans, eval scores for each, and a cross-examination a
 
 ## First 3 Actions
 [The very first three concrete things to do — unambiguous]
-` + "```" + `
-`
+`+"```",
+		n,
+		task,
+		strings.Join(scoreLines, "\n"),
+		strings.Join(planSections, "\n\n---\n\n"),
+		debate,
+	)
 
-	// Build score summary
-	scoreLines := []string{}
-	labels := []string{"A", "B", "C", "D"}
-	modelNames := []string{"Claude", "Gemini", "Codex", "GLM-5"}
-	
-	i := 0
-	for modelID, score := range scores {
-		if i < len(labels) {
-			scoreLines = append(scoreLines, fmt.Sprintf("- Plan %s (%s / %s): %.1f/10", labels[i], modelNames[i], modelID, score*10))
-			i++
-		}
+	return prompt
+}
+
+// planLabels returns labels A, B, C, ... for the given count.
+func planLabels(n int) []string {
+	labels := make([]string, n)
+	for i := 0; i < n; i++ {
+		labels[i] = string(rune('A' + i))
 	}
-
-	// Build plan sections
-	planSections := []string{}
-	i = 0
-	for _, plan := range plans {
-		if i < len(labels) {
-			section := fmt.Sprintf("## Plan %s (%s)\n\n%s", labels[i], modelNames[i], plan)
-			planSections = append(planSections, section)
-			i++
-		}
-	}
-
-	return fmt.Sprintf(template, task, strings.Join(scoreLines, "\n"), strings.Join(planSections, "\n\n---\n\n"), debate)
+	return labels
 }
