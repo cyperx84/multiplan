@@ -19,11 +19,12 @@ import (
 
 // RunResult is returned by Run.
 type RunResult struct {
-	RunID     string
-	OutputDir string
-	Plans     []models.ModelResult
-	Debate    string
-	FinalPlan string
+	RunID      string
+	OutputDir  string
+	Plans      []models.ModelResult
+	Debate     string
+	FinalPlan  string
+	EvalScores map[string]float64
 }
 
 // configProviderAdapter wraps a config.Provider so it satisfies models.Provider.
@@ -54,6 +55,7 @@ func getProvider(cfg *config.Config, id string) (models.Provider, bool) {
 
 // Run executes the full 3-phase multiplan pipeline.
 func Run(cfg *config.Config) (*RunResult, error) {
+	start := time.Now()
 	ctx := context.Background()
 
 	runID := generateRunID()
@@ -303,13 +305,18 @@ func Run(cfg *config.Config) (*RunResult, error) {
 			formatInt(totalIn), formatInt(totalOut), totalCost)
 	}
 
-	return &RunResult{
-		RunID:     runID,
-		OutputDir: outputDir,
-		Plans:     results,
-		Debate:    debate,
-		FinalPlan: fullPlan,
-	}, nil
+	runResult := &RunResult{
+		RunID:      runID,
+		OutputDir:  outputDir,
+		Plans:      results,
+		Debate:     debate,
+		FinalPlan:  fullPlan,
+		EvalScores: planScores,
+	}
+
+	printRunSummary(runResult, time.Since(start), cfg.Quiet, cfg.JSON)
+
+	return runResult, nil
 }
 
 func generateRunID() string {
@@ -329,6 +336,49 @@ func formatInt(n int) string {
 		result = append(result, c)
 	}
 	return string(result)
+}
+
+// printRunSummary prints a human-readable summary after all phases complete.
+func printRunSummary(result *RunResult, elapsed time.Duration, quiet, jsonMode bool) {
+	if quiet || jsonMode {
+		return
+	}
+
+	succeeded := 0
+	for _, p := range result.Plans {
+		if p.Error == "" {
+			succeeded++
+		}
+	}
+	total := len(result.Plans)
+
+	fmt.Printf("\n✅ multiplan complete — %d/%d models succeeded (%.0fs)\n\n", succeeded, total, elapsed.Seconds())
+
+	hasScores := len(result.EvalScores) > 0
+
+	for _, p := range result.Plans {
+		if p.Error != "" {
+			// Determine failure reason
+			reason := p.Error
+			if strings.Contains(strings.ToLower(reason), "timeout") || strings.Contains(strings.ToLower(reason), "deadline") {
+				reason = "timeout"
+			} else if strings.Contains(strings.ToLower(reason), "api") || strings.Contains(strings.ToLower(reason), "status") {
+				reason = "API error"
+			}
+			fmt.Printf("  %-10s FAILED (%s)\n", p.ModelID, reason)
+		} else if hasScores {
+			if score, ok := result.EvalScores[p.ModelID]; ok {
+				fmt.Printf("  %-10s %-6.1f plan-%s.md\n", p.ModelID, score*10, p.ModelID)
+			} else {
+				fmt.Printf("  %-10s %-6s plan-%s.md\n", p.ModelID, "—", p.ModelID)
+			}
+		} else {
+			fmt.Printf("  %-10s plan-%s.md\n", p.ModelID, p.ModelID)
+		}
+	}
+
+	finalPath := filepath.Join(result.OutputDir, "final-plan.md")
+	fmt.Printf("\n📄 Final plan: %s\n", finalPath)
 }
 
 // latticeThinkResult is the JSON structure returned by `lattice think --json`.
@@ -417,7 +467,7 @@ func runLatticeFraming(latticeCmd, task, outputDir string, verbose bool) []strin
 	return modelNames
 }
 
-// latticeSearch runs `lattice search <query> --json` and returns slugs.
+// latticeSearch runs `lattice search <query> --json` and returns up to 5 slugs.
 func latticeSearch(latticeCmd, query string, verbose bool) []string {
 	cmd := exec.Command(latticeCmd, "search", query, "--json")
 
