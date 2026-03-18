@@ -49,7 +49,7 @@ func TestConfig_GetTimeoutMs(t *testing.T) {
 		want      int
 	}{
 		{"with timeout", 60000, 60000},
-		{"zero timeout defaults to 120000", 0, 120000},
+		{"zero timeout defaults to 300000", 0, 300000},
 	}
 
 	for _, tt := range tests {

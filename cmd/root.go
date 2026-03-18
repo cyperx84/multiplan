@@ -40,7 +40,7 @@ func init() {
 	rootCmd.PersistentFlags().String("models", "", "Comma-separated models (claude,gemini,codex,glm5)")
 	rootCmd.PersistentFlags().String("debate-model", "claude", "Model for debate phase")
 	rootCmd.PersistentFlags().String("converge-model", "claude", "Model for convergence phase")
-	rootCmd.PersistentFlags().Int("timeout", 120000, "Per-model timeout in milliseconds")
+	rootCmd.PersistentFlags().Int("timeout", 300000, "Per-model timeout in milliseconds (default 5m)")
 	rootCmd.PersistentFlags().Bool("verbose", false, "Verbose output")
 	rootCmd.PersistentFlags().Bool("quiet", false, "Suppress all progress output (errors and final result only)")
 	rootCmd.PersistentFlags().Bool("skip-lattice", false, "Skip lattice mental model framing (Phase 0)")

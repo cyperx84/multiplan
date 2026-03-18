@@ -51,7 +51,7 @@ func (c *Config) GetConstraints() string {
 
 func (c *Config) GetTimeoutMs() int {
 	if c.TimeoutMs == 0 {
-		return 120000
+		return 300000
 	}
 	return c.TimeoutMs
 }
