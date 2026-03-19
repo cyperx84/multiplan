@@ -15,6 +15,10 @@ func TestEstimateCost(t *testing.T) {
 		{"codex", 1_000_000, 1_000_000, 12.4, 12.6},   // 2.50 + 10.0
 		{"glm5", 1_000_000, 1_000_000, 2.9, 3.1},      // 1.0 + 2.0
 		{"unknown", 1_000_000, 1_000_000, 0, 0},
+		{"claude", 0, 0, 0, 0},                         // zero tokens
+		{"gemini", 0, 0, 0, 0},                         // zero tokens
+		{"claude", 0, 1_000_000, 74.9, 75.1},           // only output tokens
+		{"codex", 1_000_000, 0, 2.4, 2.6},              // only input tokens
 	}
 
 	for _, tt := range tests {
