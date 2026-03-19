@@ -3,6 +3,7 @@ package models
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -89,8 +90,9 @@ func (c *ClaudeProvider) planViaAPI(ctx context.Context, apiKey, prompt string, 
 }
 
 // planViaCLI uses `claude --print` subprocess (Mode B).
-// The prompt is passed as a CLI argument (not stdin) because `claude -p -`
-// returns empty output when stdin is piped from a Go subprocess.
+// Uses --output-format json to reliably extract the plan text, because Claude CLI
+// may auto-enter "plan mode" for coding tasks, trapping the actual plan in tool_use
+// calls and returning an empty or unhelpful text result.
 func (c *ClaudeProvider) planViaCLI(ctx context.Context, prompt string, timeout time.Duration) (string, int, int, error) {
 	cmd := c.cliCmd()
 	if _, err := exec.LookPath(cmd); err != nil {
@@ -103,8 +105,8 @@ func (c *ClaudeProvider) planViaCLI(ctx context.Context, prompt string, timeout 
 		cliTimeout = 10 * time.Minute
 	}
 
-	// Pass prompt as CLI argument. --print is the long form of -p.
-	args := []string{"--print", prompt}
+	// Use JSON output for reliable parsing. Flags before prompt arg.
+	args := []string{"--output-format", "json", "--print", prompt}
 	if c.ClaudeModel != "" {
 		args = append(args, "--model", c.ClaudeModel)
 	}
@@ -125,13 +127,60 @@ func (c *ClaudeProvider) planViaCLI(ctx context.Context, prompt string, timeout 
 		return "", 0, 0, fmt.Errorf("claude CLI failed: %s", errMsg)
 	}
 
-	text := strings.TrimSpace(stdout.String())
-	if text == "" {
-		return "", 0, 0, fmt.Errorf("claude CLI returned empty output")
+	return parseClaudeJSONOutput(stdout.Bytes())
+}
+
+// claudeJSONResult represents the JSON output from `claude --print --output-format json`.
+type claudeJSONResult struct {
+	Result string `json:"result"`
+	Usage  struct {
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
+	} `json:"usage"`
+	PermissionDenials []struct {
+		ToolInput struct {
+			Plan string `json:"plan"`
+		} `json:"tool_input"`
+	} `json:"permission_denials"`
+}
+
+// parseClaudeJSONOutput extracts the plan text from Claude CLI JSON output.
+// Claude may auto-enter plan mode — the actual plan lives in permission_denials[].tool_input.plan.
+func parseClaudeJSONOutput(data []byte) (string, int, int, error) {
+	// Find JSON start (output may have leading whitespace/newlines)
+	start := bytes.IndexByte(data, '{')
+	if start < 0 {
+		text := strings.TrimSpace(string(data))
+		if text == "" {
+			return "", 0, 0, fmt.Errorf("claude CLI returned empty output (no JSON)")
+		}
+		// Fallback: non-JSON output, return as-is
+		return text, 0, 0, nil
 	}
 
-	// CLI does not expose token usage
-	return text, 0, 0, nil
+	var result claudeJSONResult
+	if err := json.Unmarshal(data[start:], &result); err != nil {
+		text := strings.TrimSpace(string(data))
+		if text == "" {
+			return "", 0, 0, fmt.Errorf("claude CLI returned unparseable JSON: %s", err)
+		}
+		return text, 0, 0, nil
+	}
+
+	// Priority 1: check permission_denials for plan mode plan text
+	for _, denial := range result.PermissionDenials {
+		if plan := strings.TrimSpace(denial.ToolInput.Plan); plan != "" {
+			return plan, result.Usage.InputTokens, result.Usage.OutputTokens, nil
+		}
+	}
+
+	// Priority 2: use the result field
+	text := strings.TrimSpace(result.Result)
+	if text == "" {
+		return "", 0, 0, fmt.Errorf("claude CLI returned empty result")
+	}
+
+	return text, result.Usage.InputTokens, result.Usage.OutputTokens, nil
 }
 
 // cliCmd returns the CLI binary name/path.
