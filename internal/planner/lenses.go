@@ -60,6 +60,8 @@ Respond with a structured plan in this exact format:
 ` + "```" + `
 
 Be concrete. Avoid vague recommendations. If you'd make a technology choice, name it and justify it briefly.
+
+IMPORTANT: Do NOT ask clarifying questions. Do NOT request more context. Do NOT summarise — produce the FULL structured plan above. Your ENTIRE response must follow the output format. Start with ## Overview immediately.
 `
 
 	return fmt.Sprintf(template, lens, task, requirements, constraints)

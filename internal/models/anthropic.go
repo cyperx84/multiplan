@@ -88,7 +88,9 @@ func (c *ClaudeProvider) planViaAPI(ctx context.Context, apiKey, prompt string, 
 	return result.Content[0].Text, result.Usage.InputTokens, result.Usage.OutputTokens, nil
 }
 
-// planViaCLI uses `claude -p` subprocess (Mode B).
+// planViaCLI uses `claude --print` subprocess (Mode B).
+// The prompt is passed as a CLI argument (not stdin) because `claude -p -`
+// returns empty output when stdin is piped from a Go subprocess.
 func (c *ClaudeProvider) planViaCLI(ctx context.Context, prompt string, timeout time.Duration) (string, int, int, error) {
 	cmd := c.cliCmd()
 	if _, err := exec.LookPath(cmd); err != nil {
@@ -101,8 +103,8 @@ func (c *ClaudeProvider) planViaCLI(ctx context.Context, prompt string, timeout 
 		cliTimeout = 10 * time.Minute
 	}
 
-	// Pass prompt via stdin. Use `claude -p -` so it reads stdin explicitly.
-	args := []string{"-p", "-"}
+	// Pass prompt as CLI argument. --print is the long form of -p.
+	args := []string{"--print", prompt}
 	if c.ClaudeModel != "" {
 		args = append(args, "--model", c.ClaudeModel)
 	}
@@ -111,7 +113,6 @@ func (c *ClaudeProvider) planViaCLI(ctx context.Context, prompt string, timeout 
 	defer cancel()
 
 	command := exec.CommandContext(ctx, cmd, args...)
-	command.Stdin = strings.NewReader(prompt)
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
 	command.Stderr = &stderr
