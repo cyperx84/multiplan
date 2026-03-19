@@ -101,9 +101,8 @@ func (c *ClaudeProvider) planViaCLI(ctx context.Context, prompt string, timeout 
 		cliTimeout = 10 * time.Minute
 	}
 
-	// Pass prompt via stdin to avoid shell escaping issues and ARG_MAX limits.
-	// `claude -p` reads from stdin when no inline prompt is given.
-	args := []string{"-p"}
+	// Pass prompt via stdin. Use `claude -p -` so it reads stdin explicitly.
+	args := []string{"-p", "-"}
 	if c.ClaudeModel != "" {
 		args = append(args, "--model", c.ClaudeModel)
 	}
