@@ -28,6 +28,7 @@ brews:
   - repository:
       owner: cyperx84
       name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: "https://github.com/cyperx84/multiplan"
     description: "Multi-model parallel planning workflow with eval framework"
     license: "MIT"
